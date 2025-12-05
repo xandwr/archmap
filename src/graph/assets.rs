@@ -343,6 +343,14 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
             const width = container.clientWidth;
             const height = container.clientHeight;
 
+            // Initialize node positions randomly around center to prevent initial clustering
+            graphData.nodes.forEach(n => {
+                if (n.x === undefined || n.y === undefined) {
+                    n.x = width / 2 + (Math.random() - 0.5) * width * 0.5;
+                    n.y = height / 2 + (Math.random() - 0.5) * height * 0.5;
+                }
+            });
+
             svg = d3.select('#graph')
                 .append('svg')
                 .attr('width', width)
@@ -434,6 +442,12 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
                 .force('center', d3.forceCenter(width / 2, height / 2))
                 .force('collision', d3.forceCollide().radius(d => getNodeRadius(d) + 5))
                 .on('tick', ticked);
+
+            // Run simulation to completion synchronously for deterministic layout
+            simulation.stop();
+            for (let i = 0; i < 300; i++) simulation.tick();
+            ticked(); // Final position update
+            simulation.alpha(0); // Fully cooled
         }
 
         function getNodeRadius(d) {
@@ -520,17 +534,17 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
             document.getElementById('node-scale').addEventListener('input', function() {
                 nodeScale = parseFloat(this.value);
                 node.selectAll('circle').attr('r', d => getNodeRadius(d));
+                // Just update collision radius for future drags, don't restart simulation
                 simulation.force('collision', d3.forceCollide().radius(d => getNodeRadius(d) + 5));
-                simulation.alpha(0.3).restart();
             });
         }
 
-        // Handle window resize
+        // Handle window resize - just update SVG size, don't restart simulation
         window.addEventListener('resize', () => {
             const container = document.getElementById('graph');
             svg.attr('width', container.clientWidth).attr('height', container.clientHeight);
+            // Update center force for future use but don't restart
             simulation.force('center', d3.forceCenter(container.clientWidth / 2, container.clientHeight / 2));
-            simulation.alpha(0.3).restart();
         });
 
         // Server-Sent Events for live updates (watch mode)
@@ -757,6 +771,8 @@ pub fn generate_static_html(graph_data: &super::GraphData) -> String {
             const container = document.getElementById('graph');
             const width = container.clientWidth;
             const height = container.clientHeight;
+            // Initialize node positions randomly around center
+            graphData.nodes.forEach(n => {{ if (n.x === undefined || n.y === undefined) {{ n.x = width / 2 + (Math.random() - 0.5) * width * 0.5; n.y = height / 2 + (Math.random() - 0.5) * height * 0.5; }} }});
             svg = d3.select('#graph').append('svg').attr('width', width).attr('height', height);
             const zoom = d3.zoom().scaleExtent([0.1, 4]).on('zoom', (event) => {{ g.attr('transform', event.transform); }});
             svg.call(zoom);
@@ -769,6 +785,8 @@ pub fn generate_static_html(graph_data: &super::GraphData) -> String {
             const tooltip = d3.select('.tooltip');
             node.on('mouseover', function(event, d) {{ tooltip.style('display', 'block').html(`<strong>${{d.name}}</strong><br>${{d.path}}<br>Lines: ${{d.lines}}<br>Fan-in: ${{d.fan_in}} | Fan-out: ${{d.fan_out}}`).style('left', (event.pageX + 10) + 'px').style('top', (event.pageY - 10) + 'px'); highlightConnections(d); }}).on('mouseout', function() {{ tooltip.style('display', 'none'); clearHighlights(); }}).on('click', function(event, d) {{ showNodeInfo(d); }});
             simulation = d3.forceSimulation(graphData.nodes).force('link', d3.forceLink(graphData.links).id(d => d.id).distance(100)).force('charge', d3.forceManyBody().strength(-300)).force('center', d3.forceCenter(width / 2, height / 2)).force('collision', d3.forceCollide().radius(d => getNodeRadius(d) + 5)).on('tick', ticked);
+            // Run simulation to completion synchronously for deterministic layout
+            simulation.stop(); for (let i = 0; i < 300; i++) simulation.tick(); ticked(); simulation.alpha(0);
         }}
 
         function getNodeRadius(d) {{ const base = Math.sqrt(d.lines) / 2 + 5; return Math.min(Math.max(base, 8), 30) * nodeScale; }}
@@ -779,7 +797,7 @@ pub fn generate_static_html(graph_data: &super::GraphData) -> String {
         function highlightConnections(d) {{ const connected = new Set(); connected.add(d.id); link.each(function(l) {{ if (l.source.id === d.id || l.target.id === d.id) {{ connected.add(l.source.id); connected.add(l.target.id); d3.select(this).classed('highlighted', true); }} }}); node.classed('highlighted', n => connected.has(n.id)); }}
         function clearHighlights() {{ link.classed('highlighted', false); node.classed('highlighted', false); }}
         function showNodeInfo(d) {{ document.getElementById('node-info').classList.add('visible'); document.getElementById('node-name').textContent = d.path; document.getElementById('node-lines').textContent = d.lines; document.getElementById('node-fan-in').textContent = d.fan_in; document.getElementById('node-fan-out').textContent = d.fan_out; document.getElementById('node-issues').textContent = d.issue_count; const exportsDiv = document.getElementById('node-exports'); exportsDiv.innerHTML = d.exports && d.exports.length > 0 ? d.exports.map(e => `<span>${{e}}</span>`).join('') : '<em>None</em>'; }}
-        window.addEventListener('resize', () => {{ const container = document.getElementById('graph'); svg.attr('width', container.clientWidth).attr('height', container.clientHeight); simulation.force('center', d3.forceCenter(container.clientWidth / 2, container.clientHeight / 2)); simulation.alpha(0.3).restart(); }});
+        window.addEventListener('resize', () => {{ const container = document.getElementById('graph'); svg.attr('width', container.clientWidth).attr('height', container.clientHeight); simulation.force('center', d3.forceCenter(container.clientWidth / 2, container.clientHeight / 2)); }});
         init();
     </script>
 </body>

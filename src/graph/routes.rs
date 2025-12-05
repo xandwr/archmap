@@ -21,6 +21,16 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::WatchStream;
 use tower_http::cors::{Any, CorsLayer};
 
+/// Get the local network IP address
+fn get_local_ip() -> Option<String> {
+    use std::net::UdpSocket;
+    // Connect to a public address to determine local IP (doesn't actually send data)
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let addr = socket.local_addr().ok()?;
+    Some(addr.ip().to_string())
+}
+
 /// Application state shared across handlers
 pub struct AppState {
     pub graph_data: Arc<tokio::sync::RwLock<GraphData>>,
@@ -55,11 +65,17 @@ pub async fn serve(
         .layer(cors)
         .with_state(state);
 
-    let addr = format!("127.0.0.1:{}", port);
-    let url = format!("http://{}", addr);
+    let addr = format!("0.0.0.0:{}", port);
+    let url = format!("http://localhost:{}", port);
 
     style::header("Starting archmap visualization server...");
-    style::status(&format!("Open in browser: {}", style::url(&url)));
+    style::status(&format!("Local:   {}", style::url(&url)));
+    if let Some(ip) = get_local_ip() {
+        style::status(&format!(
+            "Network: {}",
+            style::url(&format!("http://{}:{}", ip, port))
+        ));
+    }
     println!("Press Ctrl+C to stop");
 
     // Keep update_tx alive but unused for non-watch mode
@@ -101,11 +117,17 @@ pub async fn serve_with_watch(
         .layer(cors)
         .with_state(state);
 
-    let addr = format!("127.0.0.1:{}", port);
-    let url = format!("http://{}", addr);
+    let addr = format!("0.0.0.0:{}", port);
+    let url = format!("http://localhost:{}", port);
 
     style::header("Starting archmap visualization server (watch mode)...");
-    style::status(&format!("Open in browser: {}", style::url(&url)));
+    style::status(&format!("Local:   {}", style::url(&url)));
+    if let Some(ip) = get_local_ip() {
+        style::status(&format!(
+            "Network: {}",
+            style::url(&format!("http://{}:{}", ip, port))
+        ));
+    }
     style::status("Watching for file changes...");
     println!("Press Ctrl+C to stop");
 
