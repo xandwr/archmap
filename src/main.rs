@@ -131,31 +131,15 @@ fn run_analysis(
         return 1;
     }
 
-    // Calculate exit code based on severity threshold
-    let has_issues_above_threshold = result
+    // Exit code 0 = ran successfully (with or without warnings/info)
+    // Exit code 1 = has errors (architectural violations that should block CI)
+    // This allows using archmap in CI pipelines where warnings are informational
+    let has_errors = result
         .issues
         .iter()
-        .any(|issue| issue.severity >= args.min_severity);
+        .any(|issue| issue.severity == IssueSeverity::Error);
 
-    // Return non-zero if issues found at or above min_severity
-    // Exit code 0 = no issues, 1 = has warnings, 2 = has errors
-    if has_issues_above_threshold {
-        let max_severity = result
-            .issues
-            .iter()
-            .filter(|i| i.severity >= args.min_severity)
-            .map(|i| i.severity)
-            .max()
-            .unwrap_or(IssueSeverity::Info);
-
-        match max_severity {
-            IssueSeverity::Error => 2,
-            IssueSeverity::Warn => 1,
-            IssueSeverity::Info => 0,
-        }
-    } else {
-        0
-    }
+    if has_errors { 1 } else { 0 }
 }
 
 fn run_watch_mode(path: &Path, config: &Config, registry: &ParserRegistry, args: &AnalyzeArgs) {

@@ -189,26 +189,41 @@ impl AiOutput {
 
             writeln!(writer, "## Modules ({})\n", ordered.len())?;
 
-            for module in ordered {
+            // Build output content and track tokens
+            let mut content = String::new();
+
+            for module in &ordered {
                 let rel_path = self.relative_path(&module.path);
-                writeln!(writer, "### `{}`\n", rel_path)?;
+                content.push_str(&format!("### `{}`\n\n", rel_path));
 
                 if self.signatures_only {
                     let sig = self.format_module_signature(module);
                     if !sig.is_empty() {
-                        writeln!(writer, "```rust\n{}```\n", sig)?;
+                        content.push_str(&format!("```rust\n{}```\n\n", sig));
                     } else {
-                        writeln!(writer, "*No public API*\n")?;
+                        content.push_str("*No public API*\n\n");
                     }
                 } else {
-                    writeln!(writer, "- Lines: {}", module.lines)?;
-                    writeln!(writer, "- Imports: {}", module.imports.len())?;
+                    content.push_str(&format!("- Lines: {}\n", module.lines));
+                    content.push_str(&format!("- Imports: {}\n", module.imports.len()));
                     if !module.exports.is_empty() {
-                        writeln!(writer, "- Exports: {}", module.exports.join(", "))?;
+                        content.push_str(&format!("- Exports: {}\n", module.exports.join(", ")));
                     }
-                    writeln!(writer)?;
+                    content.push('\n');
                 }
             }
+
+            // Write the content
+            write!(writer, "{}", content)?;
+
+            // Calculate and display token count
+            let total_tokens = self.count_tokens(&format!(
+                "# Architectural Context: {}\n\n## Modules ({})\n\n{}",
+                result.project_name,
+                ordered.len(),
+                content
+            ));
+            writeln!(writer, "---\n*Context size: ~{} tokens*", total_tokens)?;
         }
 
         Ok(())

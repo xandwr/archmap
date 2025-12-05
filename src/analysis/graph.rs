@@ -206,26 +206,55 @@ impl DependencyGraph {
 }
 
 fn resolve_import(import: &str, modules: &[Module]) -> Option<PathBuf> {
-    // Extract the first path segment (crate name or module name)
+    // Extract the path segments (e.g., "crate::model::Module" -> ["crate", "model", "Module"])
     let segments: Vec<&str> = import.split("::").collect();
 
     if segments.is_empty() {
         return None;
     }
 
-    // Handle crate:: prefix
-    let search_name = if segments[0] == "crate" && segments.len() > 1 {
-        segments[1]
+    // Handle crate:: prefix - get the module path segments after "crate"
+    let module_segments = if segments[0] == "crate" && segments.len() > 1 {
+        &segments[1..]
     } else if segments[0] == "super" || segments[0] == "self" {
         // Skip relative imports for now
         return None;
     } else {
-        segments[0]
+        // External crate import - skip
+        return None;
     };
 
-    // Look for a module with matching name
+    if module_segments.is_empty() {
+        return None;
+    }
+
+    // Try to find a matching module by path components
+    // For "crate::model::Module", we want to match "src/model/mod.rs" or "src/model.rs"
+    let first_segment = module_segments[0].to_lowercase();
+
+    // Find modules whose path contains this segment as a directory or file name
     modules
         .iter()
-        .find(|m| m.name == search_name)
+        .find(|m| {
+            let path_str = m.path.to_string_lossy().to_lowercase();
+
+            // Check for exact module name match (e.g., "model" matches "src/model/mod.rs" or "src/model.rs")
+            // The module name in the path should be a directory containing mod.rs or a .rs file
+            let is_mod_file = path_str.ends_with(&format!("/{}/mod.rs", first_segment))
+                || path_str.ends_with(&format!("\\{}\\mod.rs", first_segment));
+            let is_direct_file = path_str.ends_with(&format!("/{}.rs", first_segment))
+                || path_str.ends_with(&format!("\\{}.rs", first_segment));
+
+            // Also check for submodule files like "src/model/issue.rs" when importing "crate::model::issue"
+            let is_submodule = if module_segments.len() > 1 {
+                let second_segment = module_segments[1].to_lowercase();
+                path_str.ends_with(&format!("/{}/{}.rs", first_segment, second_segment))
+                    || path_str.ends_with(&format!("\\{}\\{}.rs", first_segment, second_segment))
+            } else {
+                false
+            };
+
+            is_mod_file || is_direct_file || is_submodule
+        })
         .map(|m| m.path.clone())
 }
