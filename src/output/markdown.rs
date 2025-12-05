@@ -39,8 +39,9 @@ impl OutputFormatter for MarkdownOutput {
                 .imports
                 .iter()
                 .map(|i| {
-                    // Shorten to first segment
-                    i.split("::").next().unwrap_or(i)
+                    // Shorten to first segment and wrap in backticks
+                    let short = i.split("::").next().unwrap_or(i);
+                    format!("`{}`", short)
                 })
                 .collect();
 

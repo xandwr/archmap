@@ -6,6 +6,7 @@ use archmap::config::{Config, generate_config_template};
 use archmap::model::IssueSeverity;
 use archmap::output::{JsonOutput, MarkdownOutput, OutputFormatter};
 use archmap::parser::ParserRegistry;
+use archmap::style;
 use clap::Parser;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -39,20 +40,23 @@ fn main() {
 fn cmd_init(args: InitArgs) -> i32 {
     let config_path = args.path.join(".archmap.toml");
     if config_path.exists() {
-        eprintln!(
-            "Error: .archmap.toml already exists at {}",
-            config_path.display()
-        );
+        style::error(&format!(
+            ".archmap.toml already exists at {}",
+            style::path(&config_path)
+        ));
         return 1;
     }
 
     let template = generate_config_template();
     if let Err(e) = std::fs::write(&config_path, template) {
-        eprintln!("Error: Failed to write config file: {}", e);
+        style::error(&format!("Failed to write config file: {}", e));
         return 1;
     }
 
-    println!("Created .archmap.toml at {}", config_path.display());
+    style::success(&format!(
+        "Created .archmap.toml at {}",
+        style::path(&config_path)
+    ));
     0
 }
 
@@ -61,14 +65,17 @@ fn cmd_analyze(args: AnalyzeArgs) -> i32 {
     let path = match args.path.canonicalize() {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("Error: Could not resolve path: {}", args.path.display());
+            style::error(&format!(
+                "Could not resolve path: {}",
+                style::path(&args.path)
+            ));
             return 1;
         }
     };
 
     // Load config
     let config = Config::load(&path).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to load config: {}. Using defaults.", e);
+        style::warning(&format!("Failed to load config: {}. Using defaults.", e));
         Config::default()
     });
 
@@ -105,7 +112,7 @@ fn run_analysis(
             let file = match File::create(output_path) {
                 Ok(f) => f,
                 Err(e) => {
-                    eprintln!("Error: Could not create output file: {}", e);
+                    style::error(&format!("Could not create output file: {}", e));
                     return 1;
                 }
             };
@@ -114,20 +121,35 @@ fn run_analysis(
         None => Box::new(io::stdout()),
     };
 
-    // Format and write output
+    // Format output to string first
+    let mut buffer = Vec::new();
     let format_result = match args.format {
         OutputFormat::Markdown => {
             let formatter = MarkdownOutput::new(args.min_severity, Some(path.to_path_buf()));
-            formatter.format(&result, &mut output)
+            formatter.format(&result, &mut buffer)
         }
         OutputFormat::Json => {
             let formatter = JsonOutput::new(Some(path.to_path_buf()));
-            formatter.format(&result, &mut output)
+            formatter.format(&result, &mut buffer)
         }
     };
 
     if let Err(e) = format_result {
-        eprintln!("Error: Failed to write output: {}", e);
+        style::error(&format!("Failed to format output: {}", e));
+        return 1;
+    }
+
+    let output_str = String::from_utf8_lossy(&buffer);
+
+    // Render markdown nicely to terminal, or write plain text to file/pipe
+    let write_result = if args.output.is_none() && args.format == OutputFormat::Markdown {
+        style::render_markdown(&output_str, &mut output)
+    } else {
+        write!(output, "{}", output_str)
+    };
+
+    if let Err(e) = write_result {
+        style::error(&format!("Failed to write output: {}", e));
         return 1;
     }
 
@@ -146,10 +168,11 @@ fn run_watch_mode(path: &Path, config: &Config, registry: &ParserRegistry, args:
     use std::collections::HashMap;
     use std::fs;
 
-    println!(
-        "Watching {} for changes (Ctrl+C to stop)...\n",
-        path.display()
-    );
+    style::status(&format!(
+        "Watching {} for changes (Ctrl+C to stop)...",
+        style::path(path)
+    ));
+    println!();
 
     // Initial scan
     fn scan_files(path: &Path) -> HashMap<std::path::PathBuf, std::time::SystemTime> {
@@ -175,7 +198,7 @@ fn run_watch_mode(path: &Path, config: &Config, registry: &ParserRegistry, args:
     let mut last_modified = scan_files(path);
 
     // Run initial analysis
-    println!("=== Initial Analysis ===");
+    style::header("=== Initial Analysis ===");
     let _ = run_analysis(path, config, registry, args);
     println!();
 
@@ -187,19 +210,18 @@ fn run_watch_mode(path: &Path, config: &Config, registry: &ParserRegistry, args:
 
         // Check for new or modified files
         for (file_path, modified) in &current_files {
+            let display_path = file_path
+                .strip_prefix(path)
+                .unwrap_or(file_path)
+                .display()
+                .to_string();
             match last_modified.get(file_path) {
                 Some(last) if last != modified => {
-                    println!(
-                        "Changed: {}",
-                        file_path.strip_prefix(path).unwrap_or(file_path).display()
-                    );
+                    println!("{}", style::file_changed(&display_path));
                     changed = true;
                 }
                 None => {
-                    println!(
-                        "Added: {}",
-                        file_path.strip_prefix(path).unwrap_or(file_path).display()
-                    );
+                    println!("{}", style::file_added(&display_path));
                     changed = true;
                 }
                 _ => {}
@@ -209,16 +231,19 @@ fn run_watch_mode(path: &Path, config: &Config, registry: &ParserRegistry, args:
         // Check for deleted files
         for file_path in last_modified.keys() {
             if !current_files.contains_key(file_path) {
-                println!(
-                    "Deleted: {}",
-                    file_path.strip_prefix(path).unwrap_or(file_path).display()
-                );
+                let display_path = file_path
+                    .strip_prefix(path)
+                    .unwrap_or(file_path)
+                    .display()
+                    .to_string();
+                println!("{}", style::file_deleted(&display_path));
                 changed = true;
             }
         }
 
         if changed {
-            println!("\n=== Re-analyzing ===");
+            println!();
+            style::header("=== Re-analyzing ===");
             let _ = run_analysis(path, config, registry, args);
             println!();
             last_modified = current_files;
@@ -231,14 +256,17 @@ fn cmd_ai(args: AiArgs) -> i32 {
     let path = match args.path.canonicalize() {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("Error: Could not resolve path: {}", args.path.display());
+            style::error(&format!(
+                "Could not resolve path: {}",
+                style::path(&args.path)
+            ));
             return 1;
         }
     };
 
     // Load config
     let config = Config::load(&path).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to load config: {}. Using defaults.", e);
+        style::warning(&format!("Failed to load config: {}. Using defaults.", e));
         Config::default()
     });
 
@@ -260,7 +288,7 @@ fn cmd_ai(args: AiArgs) -> i32 {
             let file = match File::create(output_path) {
                 Ok(f) => f,
                 Err(e) => {
-                    eprintln!("Error: Could not create output file: {}", e);
+                    style::error(&format!("Could not create output file: {}", e));
                     return 1;
                 }
             };
@@ -282,7 +310,7 @@ fn cmd_ai(args: AiArgs) -> i32 {
     }
 
     if let Err(e) = formatter.format(&result, &mut output) {
-        eprintln!("Error: Failed to write output: {}", e);
+        style::error(&format!("Failed to write output: {}", e));
         return 1;
     }
 
@@ -316,7 +344,10 @@ fn cmd_impact(args: ImpactArgs) -> i32 {
     let project_path = match args.path.canonicalize() {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("Error: Could not resolve path: {}", args.path.display());
+            style::error(&format!(
+                "Could not resolve path: {}",
+                style::path(&args.path)
+            ));
             return 1;
         }
     };
@@ -331,14 +362,14 @@ fn cmd_impact(args: ImpactArgs) -> i32 {
     let target_file = match target_file.canonicalize() {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("Error: Could not find file: {}", args.file.display());
+            style::error(&format!("Could not find file: {}", style::path(&args.file)));
             return 1;
         }
     };
 
     // Load config
     let config = Config::load(&project_path).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to load config: {}. Using defaults.", e);
+        style::warning(&format!("Failed to load config: {}. Using defaults.", e));
         Config::default()
     });
 
@@ -358,9 +389,9 @@ fn cmd_impact(args: ImpactArgs) -> i32 {
     let impact = match archmap::analysis::compute_impact(&graph, &target_file, args.depth) {
         Ok(i) => i,
         Err(e) => {
-            eprintln!("Error: {}", e);
-            eprintln!(
-                "Hint: Make sure the file is a source file recognized by archmap (e.g., .rs, .ts, .py)"
+            style::error(&format!("{}", e));
+            style::hint(
+                "Make sure the file is a source file recognized by archmap (e.g., .rs, .ts, .py)",
             );
             return 1;
         }
@@ -372,7 +403,7 @@ fn cmd_impact(args: ImpactArgs) -> i32 {
             let file = match File::create(output_path) {
                 Ok(f) => f,
                 Err(e) => {
-                    eprintln!("Error: Could not create output file: {}", e);
+                    style::error(&format!("Could not create output file: {}", e));
                     return 1;
                 }
             };
@@ -381,7 +412,7 @@ fn cmd_impact(args: ImpactArgs) -> i32 {
         None => Box::new(io::stdout()),
     };
 
-    // Format and write output
+    // Format output
     let output_str = match args.format {
         OutputFormat::Markdown => {
             archmap::analysis::format_impact_markdown(&impact, Some(&project_path), args.tree)
@@ -389,8 +420,15 @@ fn cmd_impact(args: ImpactArgs) -> i32 {
         OutputFormat::Json => archmap::analysis::format_impact_json(&impact, Some(&project_path)),
     };
 
-    if let Err(e) = writeln!(output, "{}", output_str) {
-        eprintln!("Error: Failed to write output: {}", e);
+    // Render markdown nicely to terminal, or write plain text to file/pipe
+    let write_result = if args.output.is_none() && args.format == OutputFormat::Markdown {
+        style::render_markdown(&output_str, &mut output)
+    } else {
+        writeln!(output, "{}", output_str)
+    };
+
+    if let Err(e) = write_result {
+        style::error(&format!("Failed to write output: {}", e));
         return 1;
     }
 
@@ -402,14 +440,17 @@ fn cmd_snapshot(args: SnapshotArgs) -> i32 {
     let path = match args.path.canonicalize() {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("Error: Could not resolve path: {}", args.path.display());
+            style::error(&format!(
+                "Could not resolve path: {}",
+                style::path(&args.path)
+            ));
             return 1;
         }
     };
 
     // Load config
     let config = Config::load(&path).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to load config: {}. Using defaults.", e);
+        style::warning(&format!("Failed to load config: {}. Using defaults.", e));
         Config::default()
     });
 
@@ -429,18 +470,23 @@ fn cmd_snapshot(args: SnapshotArgs) -> i32 {
     let output_path = &args.save;
 
     // Save snapshot
-    if let Err(e) = archmap::snapshot::save_snapshot(&snapshot, &output_path) {
-        eprintln!("Error: Failed to save snapshot: {}", e);
+    if let Err(e) = archmap::snapshot::save_snapshot(&snapshot, output_path) {
+        style::error(&format!("Failed to save snapshot: {}", e));
         return 1;
     }
 
-    println!("Snapshot saved to: {}", output_path.display());
-    println!();
-    println!("Summary:");
-    println!("  Modules: {}", snapshot.metrics.total_modules);
-    println!("  Lines: {}", snapshot.metrics.total_lines);
-    println!("  Dependencies: {}", snapshot.metrics.total_dependencies);
-    println!("  Issues: {}", snapshot.issues.len());
+    style::success(&format!("Snapshot saved to: {}", style::path(output_path)));
+    style::section("Summary");
+    println!(
+        "{}",
+        style::metric("Modules", snapshot.metrics.total_modules)
+    );
+    println!("{}", style::metric("Lines", snapshot.metrics.total_lines));
+    println!(
+        "{}",
+        style::metric("Dependencies", snapshot.metrics.total_dependencies)
+    );
+    println!("{}", style::metric("Issues", snapshot.issues.len()));
 
     0
 }
@@ -450,7 +496,7 @@ fn cmd_diff(args: DiffArgs) -> i32 {
     let baseline = match archmap::snapshot::load_snapshot(&args.baseline) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error: Failed to load baseline snapshot: {}", e);
+            style::error(&format!("Failed to load baseline snapshot: {}", e));
             return 1;
         }
     };
@@ -459,14 +505,17 @@ fn cmd_diff(args: DiffArgs) -> i32 {
     let path = match args.path.canonicalize() {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("Error: Could not resolve path: {}", args.path.display());
+            style::error(&format!(
+                "Could not resolve path: {}",
+                style::path(&args.path)
+            ));
             return 1;
         }
     };
 
     // Load config
     let config = Config::load(&path).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to load config: {}. Using defaults.", e);
+        style::warning(&format!("Failed to load config: {}. Using defaults.", e));
         Config::default()
     });
 
@@ -491,7 +540,7 @@ fn cmd_diff(args: DiffArgs) -> i32 {
             let file = match File::create(output_path) {
                 Ok(f) => f,
                 Err(e) => {
-                    eprintln!("Error: Could not create output file: {}", e);
+                    style::error(&format!("Could not create output file: {}", e));
                     return 1;
                 }
             };
@@ -500,14 +549,21 @@ fn cmd_diff(args: DiffArgs) -> i32 {
         None => Box::new(io::stdout()),
     };
 
-    // Format and write output
+    // Format output
     let output_str = match args.format {
         OutputFormat::Markdown => archmap::snapshot::format_diff_markdown(&diff),
         OutputFormat::Json => archmap::snapshot::format_diff_json(&diff),
     };
 
-    if let Err(e) = writeln!(output, "{}", output_str) {
-        eprintln!("Error: Failed to write output: {}", e);
+    // Render markdown nicely to terminal, or write plain text to file/pipe
+    let write_result = if args.output.is_none() && args.format == OutputFormat::Markdown {
+        style::render_markdown(&output_str, &mut output)
+    } else {
+        writeln!(output, "{}", output_str)
+    };
+
+    if let Err(e) = write_result {
+        style::error(&format!("Failed to write output: {}", e));
         return 1;
     }
 
@@ -519,14 +575,17 @@ fn cmd_graph(args: GraphArgs) -> i32 {
     let path = match args.path.canonicalize() {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("Error: Could not resolve path: {}", args.path.display());
+            style::error(&format!(
+                "Could not resolve path: {}",
+                style::path(&args.path)
+            ));
             return 1;
         }
     };
 
     // Load config
     let config = Config::load(&path).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to load config: {}. Using defaults.", e);
+        style::warning(&format!("Failed to load config: {}. Using defaults.", e));
         Config::default()
     });
 
@@ -556,13 +615,13 @@ fn cmd_graph(args: GraphArgs) -> i32 {
             if let Err(e) = rt.block_on(archmap::graph::serve_with_watch(
                 graph_data, args.port, args.open, watch_ctx,
             )) {
-                eprintln!("Error: Server failed: {}", e);
+                style::error(&format!("Server failed: {}", e));
                 return 1;
             }
         } else {
             // Static serve mode
             if let Err(e) = rt.block_on(archmap::graph::serve(graph_data, args.port, args.open)) {
-                eprintln!("Error: Server failed: {}", e);
+                style::error(&format!("Server failed: {}", e));
                 return 1;
             }
         }
@@ -570,13 +629,13 @@ fn cmd_graph(args: GraphArgs) -> i32 {
         // Export static HTML
         let html = generate_static_html(&graph_data);
         if let Err(e) = std::fs::write(&export_path, html) {
-            eprintln!("Error: Failed to write export file: {}", e);
+            style::error(&format!("Failed to write export file: {}", e));
             return 1;
         }
-        println!("Graph exported to: {}", export_path.display());
+        style::success(&format!("Graph exported to: {}", style::path(&export_path)));
     } else {
-        eprintln!(
-            "Error: Use --serve to start the visualization server, or --export to save static HTML"
+        style::error(
+            "Use --serve to start the visualization server, or --export to save static HTML",
         );
         return 1;
     }

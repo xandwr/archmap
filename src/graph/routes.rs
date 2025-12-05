@@ -1,5 +1,6 @@
 use super::assets::INDEX_HTML;
 use super::data::GraphData;
+use crate::style;
 use axum::{
     Json, Router,
     extract::State,
@@ -56,8 +57,8 @@ pub async fn serve(
     let addr = format!("127.0.0.1:{}", port);
     let url = format!("http://{}", addr);
 
-    println!("Starting archmap visualization server...");
-    println!("Open in browser: {}", url);
+    style::header("Starting archmap visualization server...");
+    style::status(&format!("Open in browser: {}", style::url(&url)));
     println!("Press Ctrl+C to stop");
 
     // Keep update_tx alive but unused for non-watch mode
@@ -65,7 +66,7 @@ pub async fn serve(
 
     if open_browser {
         if let Err(e) = open::that(&url) {
-            eprintln!("Warning: Could not open browser: {}", e);
+            style::warning(&format!("Could not open browser: {}", e));
         }
     }
 
@@ -102,14 +103,14 @@ pub async fn serve_with_watch(
     let addr = format!("127.0.0.1:{}", port);
     let url = format!("http://{}", addr);
 
-    println!("Starting archmap visualization server (watch mode)...");
-    println!("Open in browser: {}", url);
-    println!("Watching for file changes...");
+    style::header("Starting archmap visualization server (watch mode)...");
+    style::status(&format!("Open in browser: {}", style::url(&url)));
+    style::status("Watching for file changes...");
     println!("Press Ctrl+C to stop");
 
     if open_browser {
         if let Err(e) = open::that(&url) {
-            eprintln!("Warning: Could not open browser: {}", e);
+            style::warning(&format!("Could not open browser: {}", e));
         }
     }
 
@@ -147,15 +148,18 @@ async fn watch_files(
 
         // Check for new or modified files
         for (file_path, modified) in &current_files {
+            let display_path = file_path
+                .strip_prefix(&ctx.path)
+                .unwrap_or(file_path)
+                .display()
+                .to_string();
             match last_modified.get(file_path) {
                 Some(last) if last != modified => {
-                    let display_path = file_path.strip_prefix(&ctx.path).unwrap_or(file_path);
-                    println!("  Changed: {}", display_path.display());
+                    println!("  {}", style::file_changed(&display_path));
                     changed = true;
                 }
                 None => {
-                    let display_path = file_path.strip_prefix(&ctx.path).unwrap_or(file_path);
-                    println!("  Added: {}", display_path.display());
+                    println!("  {}", style::file_added(&display_path));
                     changed = true;
                 }
                 _ => {}
@@ -165,14 +169,18 @@ async fn watch_files(
         // Check for deleted files
         for file_path in last_modified.keys() {
             if !current_files.contains_key(file_path) {
-                let display_path = file_path.strip_prefix(&ctx.path).unwrap_or(file_path);
-                println!("  Deleted: {}", display_path.display());
+                let display_path = file_path
+                    .strip_prefix(&ctx.path)
+                    .unwrap_or(file_path)
+                    .display()
+                    .to_string();
+                println!("  {}", style::file_deleted(&display_path));
                 changed = true;
             }
         }
 
         if changed {
-            println!("  Re-analyzing...");
+            style::status("Re-analyzing...");
 
             // Re-run analysis
             let result = crate::analysis::analyze(&ctx.path, &ctx.config, &ctx.registry, &[]);
@@ -188,7 +196,7 @@ async fn watch_files(
             version += 1;
             let _ = update_tx.send(version);
 
-            println!("  Graph updated (version {})", version);
+            style::success(&format!("Graph updated (version {})", version));
             last_modified = current_files;
         }
     }

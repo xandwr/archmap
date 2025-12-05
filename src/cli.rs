@@ -239,7 +239,7 @@ pub struct InitArgs {
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum OutputFormat {
     #[default]
     Markdown,

@@ -6,6 +6,7 @@ pub mod model;
 pub mod output;
 pub mod parser;
 pub mod snapshot;
+pub mod style;
 
 pub use cli::Cli;
 pub use config::Config;

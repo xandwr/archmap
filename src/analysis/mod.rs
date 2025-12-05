@@ -21,6 +21,7 @@ pub use impact::{
 use crate::config::Config;
 use crate::model::{AnalysisResult, Module};
 use crate::parser::ParserRegistry;
+use crate::style;
 use ignore::{WalkBuilder, WalkState};
 use std::path::Path;
 use std::sync::Mutex;
@@ -128,7 +129,7 @@ fn discover_modules(path: &Path, registry: &ParserRegistry, exclude: &[String]) 
                     modules.lock().unwrap().push(module);
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to parse {}: {}", file_path.display(), e);
+                    style::warning(&format!("Failed to parse {}: {}", file_path.display(), e));
                 }
             }
 
