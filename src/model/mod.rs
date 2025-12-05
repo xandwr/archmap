@@ -4,7 +4,7 @@ mod module;
 
 pub use boundary::{Boundary, BoundaryKind, BoundaryViolation};
 pub use issue::{Issue, IssueKind, IssueSeverity, Location};
-pub use module::{Definition, DefinitionKind, Module};
+pub use module::{Definition, DefinitionKind, Module, Visibility};
 
 use petgraph::graph::DiGraph;
 use std::path::PathBuf;

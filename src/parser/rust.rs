@@ -1,13 +1,54 @@
-use crate::model::{Definition, DefinitionKind, Module};
+use crate::model::{Definition, DefinitionKind, Module, Visibility};
 use crate::parser::{LanguageParser, ParseError};
 use std::path::Path;
-use tree_sitter::Parser;
+use tree_sitter::{Node, Parser};
 
 pub struct RustParser;
 
 impl RustParser {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Check if a node has a visibility modifier (pub, pub(crate), etc.)
+    fn get_visibility(node: &Node, source_bytes: &[u8]) -> Visibility {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "visibility_modifier" {
+                if let Ok(text) = child.utf8_text(source_bytes) {
+                    if text.contains("crate") {
+                        return Visibility::Crate;
+                    } else if text.starts_with("pub") {
+                        return Visibility::Public;
+                    }
+                }
+            }
+        }
+        Visibility::Private
+    }
+
+    /// Extract signature from a node up to the opening brace
+    fn extract_signature(node: &Node, source: &str) -> Option<String> {
+        let start = node.start_byte();
+        let end = node.end_byte();
+        let text = &source[start..end];
+
+        // Find the opening brace and truncate there
+        if let Some(brace_pos) = text.find('{') {
+            let sig = text[..brace_pos].trim();
+            Some(sig.to_string())
+        } else {
+            // No brace (e.g., unit struct or semicolon-terminated)
+            let sig = text.trim_end_matches(';').trim();
+            Some(sig.to_string())
+        }
+    }
+
+    /// Extract full definition including body (for structs, enums)
+    fn extract_full_definition(node: &Node, source: &str) -> Option<String> {
+        let start = node.start_byte();
+        let end = node.end_byte();
+        Some(source[start..end].to_string())
     }
 }
 
@@ -48,55 +89,85 @@ impl LanguageParser for RustParser {
                     }
                 }
                 "function_item" => {
+                    let visibility = Self::get_visibility(&node, source_bytes);
+                    let signature = Self::extract_signature(&node, source);
+
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
                             module.definitions.push(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Function,
                                 line: node.start_position().row + 1,
+                                visibility,
+                                signature,
                             });
-                            module.exports.push(name.to_string());
+                            if visibility == Visibility::Public {
+                                module.exports.push(name.to_string());
+                            }
                         }
                     }
                 }
                 "struct_item" => {
+                    let visibility = Self::get_visibility(&node, source_bytes);
+                    let signature = Self::extract_full_definition(&node, source);
+
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
                             module.definitions.push(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Struct,
                                 line: node.start_position().row + 1,
+                                visibility,
+                                signature,
                             });
-                            module.exports.push(name.to_string());
+                            if visibility == Visibility::Public {
+                                module.exports.push(name.to_string());
+                            }
                         }
                     }
                 }
                 "enum_item" => {
+                    let visibility = Self::get_visibility(&node, source_bytes);
+                    let signature = Self::extract_full_definition(&node, source);
+
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
                             module.definitions.push(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Enum,
                                 line: node.start_position().row + 1,
+                                visibility,
+                                signature,
                             });
-                            module.exports.push(name.to_string());
+                            if visibility == Visibility::Public {
+                                module.exports.push(name.to_string());
+                            }
                         }
                     }
                 }
                 "trait_item" => {
+                    let visibility = Self::get_visibility(&node, source_bytes);
+                    let signature = Self::extract_full_definition(&node, source);
+
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
                             module.definitions.push(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Trait,
                                 line: node.start_position().row + 1,
+                                visibility,
+                                signature,
                             });
-                            module.exports.push(name.to_string());
+                            if visibility == Visibility::Public {
+                                module.exports.push(name.to_string());
+                            }
                         }
                     }
                 }
                 "impl_item" => {
                     // For impl, try to get the type being implemented
+                    let signature = Self::extract_signature(&node, source);
+
                     if let Ok(impl_text) = node.utf8_text(source_bytes) {
                         let name = impl_text
                             .lines()
@@ -114,15 +185,59 @@ impl LanguageParser for RustParser {
                                 name,
                                 kind: DefinitionKind::Impl,
                                 line: node.start_position().row + 1,
+                                visibility: Visibility::Private, // impl blocks don't have visibility
+                                signature,
                             });
+                        }
+                    }
+                }
+                "type_item" => {
+                    let visibility = Self::get_visibility(&node, source_bytes);
+                    let signature = Self::extract_full_definition(&node, source);
+
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        if let Ok(name) = name_node.utf8_text(source_bytes) {
+                            module.definitions.push(Definition {
+                                name: name.to_string(),
+                                kind: DefinitionKind::Type,
+                                line: node.start_position().row + 1,
+                                visibility,
+                                signature,
+                            });
+                            if visibility == Visibility::Public {
+                                module.exports.push(name.to_string());
+                            }
+                        }
+                    }
+                }
+                "const_item" | "static_item" => {
+                    let visibility = Self::get_visibility(&node, source_bytes);
+                    let signature = Self::extract_full_definition(&node, source);
+
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        if let Ok(name) = name_node.utf8_text(source_bytes) {
+                            module.definitions.push(Definition {
+                                name: name.to_string(),
+                                kind: DefinitionKind::Type, // Using Type for constants
+                                line: node.start_position().row + 1,
+                                visibility,
+                                signature,
+                            });
+                            if visibility == Visibility::Public {
+                                module.exports.push(name.to_string());
+                            }
                         }
                     }
                 }
                 "mod_item" => {
                     // Handle mod declarations for nested modules
+                    let visibility = Self::get_visibility(&node, source_bytes);
+
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.exports.push(name.to_string());
+                            if visibility == Visibility::Public {
+                                module.exports.push(name.to_string());
+                            }
                         }
                     }
                 }

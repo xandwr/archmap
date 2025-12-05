@@ -16,6 +16,21 @@ pub struct Definition {
     pub name: String,
     pub kind: DefinitionKind,
     pub line: usize,
+    /// Visibility of the definition (public, private, crate-visible)
+    #[serde(default)]
+    pub visibility: Visibility,
+    /// Full signature text (for functions, structs, etc.)
+    #[serde(default)]
+    pub signature: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum Visibility {
+    Public,
+    #[default]
+    Private,
+    /// pub(crate) in Rust
+    Crate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

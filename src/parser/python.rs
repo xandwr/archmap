@@ -1,13 +1,36 @@
-use crate::model::{Definition, DefinitionKind, Module};
+use crate::model::{Definition, DefinitionKind, Module, Visibility};
 use crate::parser::{LanguageParser, ParseError};
 use std::path::Path;
-use tree_sitter::Parser;
+use tree_sitter::{Node, Parser};
 
 pub struct PythonParser;
 
 impl PythonParser {
     pub fn new() -> Self {
         Self
+    }
+
+    /// In Python, names starting with _ are considered private
+    fn get_visibility(name: &str) -> Visibility {
+        if name.starts_with('_') {
+            Visibility::Private
+        } else {
+            Visibility::Public
+        }
+    }
+
+    /// Extract function signature (def line)
+    fn extract_signature(node: &Node, source: &str) -> Option<String> {
+        let start = node.start_byte();
+        let end = node.end_byte();
+        let text = &source[start..end];
+
+        // Find the colon and take everything before it
+        if let Some(colon_pos) = text.find(':') {
+            Some(text[..colon_pos].trim().to_string())
+        } else {
+            text.lines().next().map(|s| s.trim().to_string())
+        }
     }
 }
 
@@ -59,13 +82,18 @@ impl LanguageParser for PythonParser {
                 "function_definition" => {
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
+                            let visibility = Self::get_visibility(name);
+                            let signature = Self::extract_signature(&node, source);
+
                             module.definitions.push(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Function,
                                 line: node.start_position().row + 1,
+                                visibility,
+                                signature,
                             });
                             // In Python, top-level functions are typically exported
-                            if !name.starts_with('_') {
+                            if visibility == Visibility::Public {
                                 module.exports.push(name.to_string());
                             }
                         }
@@ -74,13 +102,18 @@ impl LanguageParser for PythonParser {
                 "class_definition" => {
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
+                            let visibility = Self::get_visibility(name);
+                            let signature = Self::extract_signature(&node, source);
+
                             module.definitions.push(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Class,
                                 line: node.start_position().row + 1,
+                                visibility,
+                                signature,
                             });
                             // In Python, top-level classes are typically exported
-                            if !name.starts_with('_') {
+                            if visibility == Visibility::Public {
                                 module.exports.push(name.to_string());
                             }
                         }
@@ -94,12 +127,17 @@ impl LanguageParser for PythonParser {
                             "function_definition" => {
                                 if let Some(name_node) = child.child_by_field_name("name") {
                                     if let Ok(name) = name_node.utf8_text(source_bytes) {
+                                        let visibility = Self::get_visibility(name);
+                                        let signature = Self::extract_signature(&child, source);
+
                                         module.definitions.push(Definition {
                                             name: name.to_string(),
                                             kind: DefinitionKind::Function,
                                             line: child.start_position().row + 1,
+                                            visibility,
+                                            signature,
                                         });
-                                        if !name.starts_with('_') {
+                                        if visibility == Visibility::Public {
                                             module.exports.push(name.to_string());
                                         }
                                     }
@@ -108,12 +146,17 @@ impl LanguageParser for PythonParser {
                             "class_definition" => {
                                 if let Some(name_node) = child.child_by_field_name("name") {
                                     if let Ok(name) = name_node.utf8_text(source_bytes) {
+                                        let visibility = Self::get_visibility(name);
+                                        let signature = Self::extract_signature(&child, source);
+
                                         module.definitions.push(Definition {
                                             name: name.to_string(),
                                             kind: DefinitionKind::Class,
                                             line: child.start_position().row + 1,
+                                            visibility,
+                                            signature,
                                         });
-                                        if !name.starts_with('_') {
+                                        if visibility == Visibility::Public {
                                             module.exports.push(name.to_string());
                                         }
                                     }

@@ -1,13 +1,33 @@
-use crate::model::{Definition, DefinitionKind, Module};
+use crate::model::{Definition, DefinitionKind, Module, Visibility};
 use crate::parser::{LanguageParser, ParseError};
 use std::path::Path;
-use tree_sitter::Parser;
+use tree_sitter::{Node, Parser};
 
 pub struct TypeScriptParser;
 
 impl TypeScriptParser {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Extract signature from node up to opening brace
+    fn extract_signature(node: &Node, source: &str) -> Option<String> {
+        let start = node.start_byte();
+        let end = node.end_byte();
+        let text = &source[start..end];
+
+        if let Some(brace_pos) = text.find('{') {
+            Some(text[..brace_pos].trim().to_string())
+        } else {
+            text.lines().next().map(|s| s.trim().to_string())
+        }
+    }
+
+    /// Extract full definition
+    fn extract_full_definition(node: &Node, source: &str) -> Option<String> {
+        let start = node.start_byte();
+        let end = node.end_byte();
+        Some(source[start..end].to_string())
     }
 }
 
@@ -56,56 +76,65 @@ impl LanguageParser for TypeScriptParser {
                     }
                 }
                 "export_statement" => {
-                    // Handle export declarations
+                    // Handle export declarations - these are public
                     let mut child_cursor = node.walk();
                     for child in node.children(&mut child_cursor) {
-                        extract_definition(&child, source_bytes, &mut module);
+                        extract_definition(&child, source_bytes, source, &mut module, true);
                     }
                 }
                 "function_declaration" => {
+                    let signature = Self::extract_signature(&node, source);
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
                             module.definitions.push(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Function,
                                 line: node.start_position().row + 1,
+                                visibility: Visibility::Private, // Not exported
+                                signature,
                             });
                         }
                     }
                 }
                 "class_declaration" => {
+                    let signature = Self::extract_full_definition(&node, source);
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
                             module.definitions.push(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Class,
                                 line: node.start_position().row + 1,
+                                visibility: Visibility::Private,
+                                signature,
                             });
-                            module.exports.push(name.to_string());
                         }
                     }
                 }
                 "interface_declaration" => {
+                    let signature = Self::extract_full_definition(&node, source);
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
                             module.definitions.push(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Interface,
                                 line: node.start_position().row + 1,
+                                visibility: Visibility::Private,
+                                signature,
                             });
-                            module.exports.push(name.to_string());
                         }
                     }
                 }
                 "type_alias_declaration" => {
+                    let signature = Self::extract_full_definition(&node, source);
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
                             module.definitions.push(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Type,
                                 line: node.start_position().row + 1,
+                                visibility: Visibility::Private,
+                                signature,
                             });
-                            module.exports.push(name.to_string());
                         }
                     }
                 }
@@ -116,10 +145,13 @@ impl LanguageParser for TypeScriptParser {
                         if child.kind() == "variable_declarator" {
                             if let Some(name_node) = child.child_by_field_name("name") {
                                 if let Ok(name) = name_node.utf8_text(source_bytes) {
+                                    let signature = Self::extract_full_definition(&node, source);
                                     module.definitions.push(Definition {
                                         name: name.to_string(),
                                         kind: DefinitionKind::Function, // Could be a const function
                                         line: node.start_position().row + 1,
+                                        visibility: Visibility::Private,
+                                        signature,
                                     });
                                 }
                             }
@@ -145,41 +177,85 @@ fn extract_import_path(import_text: &str) -> String {
     String::new()
 }
 
-fn extract_definition(node: &tree_sitter::Node, source_bytes: &[u8], module: &mut Module) {
+fn extract_definition(
+    node: &Node,
+    source_bytes: &[u8],
+    source: &str,
+    module: &mut Module,
+    is_exported: bool,
+) {
+    let visibility = if is_exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
+
     match node.kind() {
         "function_declaration" => {
             if let Some(name_node) = node.child_by_field_name("name") {
                 if let Ok(name) = name_node.utf8_text(source_bytes) {
+                    let signature = TypeScriptParser::extract_signature(node, source);
                     module.definitions.push(Definition {
                         name: name.to_string(),
                         kind: DefinitionKind::Function,
                         line: node.start_position().row + 1,
+                        visibility,
+                        signature,
                     });
-                    module.exports.push(name.to_string());
+                    if is_exported {
+                        module.exports.push(name.to_string());
+                    }
                 }
             }
         }
         "class_declaration" => {
             if let Some(name_node) = node.child_by_field_name("name") {
                 if let Ok(name) = name_node.utf8_text(source_bytes) {
+                    let signature = TypeScriptParser::extract_full_definition(node, source);
                     module.definitions.push(Definition {
                         name: name.to_string(),
                         kind: DefinitionKind::Class,
                         line: node.start_position().row + 1,
+                        visibility,
+                        signature,
                     });
-                    module.exports.push(name.to_string());
+                    if is_exported {
+                        module.exports.push(name.to_string());
+                    }
                 }
             }
         }
         "interface_declaration" => {
             if let Some(name_node) = node.child_by_field_name("name") {
                 if let Ok(name) = name_node.utf8_text(source_bytes) {
+                    let signature = TypeScriptParser::extract_full_definition(node, source);
                     module.definitions.push(Definition {
                         name: name.to_string(),
                         kind: DefinitionKind::Interface,
                         line: node.start_position().row + 1,
+                        visibility,
+                        signature,
                     });
-                    module.exports.push(name.to_string());
+                    if is_exported {
+                        module.exports.push(name.to_string());
+                    }
+                }
+            }
+        }
+        "type_alias_declaration" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Ok(name) = name_node.utf8_text(source_bytes) {
+                    let signature = TypeScriptParser::extract_full_definition(node, source);
+                    module.definitions.push(Definition {
+                        name: name.to_string(),
+                        kind: DefinitionKind::Type,
+                        line: node.start_position().row + 1,
+                        visibility,
+                        signature,
+                    });
+                    if is_exported {
+                        module.exports.push(name.to_string());
+                    }
                 }
             }
         }

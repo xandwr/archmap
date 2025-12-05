@@ -5,6 +5,7 @@ mod coupling;
 mod depth;
 mod god_object;
 mod graph;
+mod impact;
 
 pub use boundary::detect_boundary_violations;
 pub use circular::detect_circular_dependencies;
@@ -13,6 +14,9 @@ pub use coupling::detect_high_coupling;
 pub use depth::detect_deep_dependency_chains;
 pub use god_object::detect_god_objects;
 pub use graph::DependencyGraph;
+pub use impact::{
+    ImpactAnalysis, ImpactError, compute_impact, format_impact_json, format_impact_markdown,
+};
 
 use crate::config::Config;
 use crate::model::{AnalysisResult, Module};

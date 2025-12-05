@@ -1,6 +1,8 @@
+mod ai;
 mod json;
 mod markdown;
 
+pub use ai::AiOutput;
 pub use json::JsonOutput;
 pub use markdown::MarkdownOutput;
 
