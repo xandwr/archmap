@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod cli;
 pub mod config;
+pub mod fs;
 pub mod graph;
 pub mod model;
 pub mod output;

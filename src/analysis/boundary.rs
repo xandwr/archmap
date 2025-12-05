@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::fs::{FileSystem, default_fs};
 use crate::model::{Issue, Location, Module};
 use std::collections::HashMap;
 
@@ -19,6 +20,14 @@ fn is_string_literal_definition(line: &str, indicator: &str) -> bool {
 }
 
 pub fn detect_boundary_violations(modules: &[Module], config: &Config) -> Vec<Issue> {
+    detect_boundary_violations_with_fs(modules, config, default_fs())
+}
+
+pub fn detect_boundary_violations_with_fs(
+    modules: &[Module],
+    config: &Config,
+    fs: &dyn FileSystem,
+) -> Vec<Issue> {
     let mut issues = Vec::new();
 
     // For each boundary, track where it's crossed
@@ -27,7 +36,7 @@ pub fn detect_boundary_violations(modules: &[Module], config: &Config) -> Vec<Is
 
         for module in modules {
             // Read the file content to scan for indicators
-            let content = match std::fs::read_to_string(&module.path) {
+            let content = match fs.read_to_string(&module.path) {
                 Ok(c) => c,
                 Err(_) => continue,
             };

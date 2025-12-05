@@ -1,3 +1,4 @@
+use crate::fs::{FileSystem, default_fs};
 use crate::model::{Boundary, BoundaryKind};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -72,13 +73,17 @@ impl Default for Thresholds {
 
 impl Config {
     pub fn load(project_path: &Path) -> Result<Self, ConfigError> {
+        Self::load_with_fs(project_path, default_fs())
+    }
+
+    pub fn load_with_fs(project_path: &Path, fs: &dyn FileSystem) -> Result<Self, ConfigError> {
         let config_path = project_path.join(".archmap.toml");
 
-        if !config_path.exists() {
+        if !fs.exists(&config_path) {
             return Ok(Self::default());
         }
 
-        let content = std::fs::read_to_string(&config_path)?;
+        let content = fs.read_to_string(&config_path)?;
         let raw: RawConfig = toml::from_str(&content)?;
 
         let thresholds = match raw.thresholds {

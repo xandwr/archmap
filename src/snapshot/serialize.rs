@@ -1,3 +1,4 @@
+use crate::fs::{FileSystem, default_fs};
 use crate::model::{AnalysisResult, IssueKind, Module};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -150,21 +151,40 @@ impl Snapshot {
 }
 
 pub fn save_snapshot(snapshot: &Snapshot, path: &Path) -> std::io::Result<()> {
+    save_snapshot_with_fs(snapshot, path, default_fs())
+}
+
+pub fn save_snapshot_with_fs(
+    snapshot: &Snapshot,
+    path: &Path,
+    fs: &dyn FileSystem,
+) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(snapshot)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    std::fs::write(path, json)
+    fs.write(path, &json)
 }
 
 pub fn load_snapshot(path: &Path) -> Result<Snapshot, Box<dyn std::error::Error>> {
-    let content = std::fs::read_to_string(path)?;
+    load_snapshot_with_fs(path, default_fs())
+}
+
+pub fn load_snapshot_with_fs(
+    path: &Path,
+    fs: &dyn FileSystem,
+) -> Result<Snapshot, Box<dyn std::error::Error>> {
+    let content = fs.read_to_string(path)?;
     let snapshot: Snapshot = serde_json::from_str(&content)?;
     Ok(snapshot)
 }
 
 fn compute_file_hash(path: &PathBuf) -> String {
+    compute_file_hash_with_fs(path, default_fs())
+}
+
+fn compute_file_hash_with_fs(path: &PathBuf, fs: &dyn FileSystem) -> String {
     use std::collections::hash_map::DefaultHasher;
 
-    match std::fs::read_to_string(path) {
+    match fs.read_to_string(path) {
         Ok(content) => {
             let mut hasher = DefaultHasher::new();
             content.hash(&mut hasher);

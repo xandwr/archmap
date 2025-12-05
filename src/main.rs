@@ -3,6 +3,7 @@ use archmap::cli::{
     SnapshotArgs,
 };
 use archmap::config::{Config, generate_config_template};
+use archmap::fs::{FileSystem, default_fs};
 use archmap::model::IssueSeverity;
 use archmap::output::{JsonOutput, MarkdownOutput, OutputFormatter};
 use archmap::parser::ParserRegistry;
@@ -38,8 +39,12 @@ fn main() {
 }
 
 fn cmd_init(args: InitArgs) -> i32 {
+    cmd_init_with_fs(args, default_fs())
+}
+
+fn cmd_init_with_fs(args: InitArgs, fs: &dyn FileSystem) -> i32 {
     let config_path = args.path.join(".archmap.toml");
-    if config_path.exists() {
+    if fs.exists(&config_path) {
         style::error(&format!(
             ".archmap.toml already exists at {}",
             style::path(&config_path)
@@ -48,7 +53,7 @@ fn cmd_init(args: InitArgs) -> i32 {
     }
 
     let template = generate_config_template();
-    if let Err(e) = std::fs::write(&config_path, template) {
+    if let Err(e) = fs.write(&config_path, &template) {
         style::error(&format!("Failed to write config file: {}", e));
         return 1;
     }
@@ -321,6 +326,14 @@ fn collect_sources(
     path: &Path,
     registry: &ParserRegistry,
 ) -> std::collections::HashMap<std::path::PathBuf, String> {
+    collect_sources_with_fs(path, registry, default_fs())
+}
+
+fn collect_sources_with_fs(
+    path: &Path,
+    registry: &ParserRegistry,
+    fs: &dyn FileSystem,
+) -> std::collections::HashMap<std::path::PathBuf, String> {
     let mut sources = std::collections::HashMap::new();
     let walker = ignore::WalkBuilder::new(path)
         .hidden(true)
@@ -330,7 +343,7 @@ fn collect_sources(
     for entry in walker.flatten() {
         let file_path = entry.path();
         if file_path.is_file() && registry.find_parser(file_path).is_some() {
-            if let Ok(content) = std::fs::read_to_string(file_path) {
+            if let Ok(content) = fs.read_to_string(file_path) {
                 sources.insert(file_path.to_path_buf(), content);
             }
         }
@@ -628,7 +641,7 @@ fn cmd_graph(args: GraphArgs) -> i32 {
     } else if let Some(export_path) = args.export {
         // Export static HTML
         let html = generate_static_html(&graph_data);
-        if let Err(e) = std::fs::write(&export_path, html) {
+        if let Err(e) = default_fs().write(&export_path, &html) {
             style::error(&format!("Failed to write export file: {}", e));
             return 1;
         }

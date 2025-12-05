@@ -7,7 +7,7 @@ mod god_object;
 mod graph;
 mod impact;
 
-pub use boundary::detect_boundary_violations;
+pub use boundary::{detect_boundary_violations, detect_boundary_violations_with_fs};
 pub use circular::detect_circular_dependencies;
 pub use cohesion::detect_low_cohesion;
 pub use coupling::detect_high_coupling;
