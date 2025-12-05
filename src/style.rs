@@ -74,7 +74,7 @@ pub fn is_terminal() -> bool {
 /// Render markdown to the terminal with colors and formatting.
 /// If not a TTY, writes plain markdown.
 pub fn render_markdown(markdown: &str, output: &mut dyn Write) -> io::Result<()> {
-    if io::stdout().is_terminal() && output_is_stdout(output) {
+    if io::stdout().is_terminal() {
         // Use termimad for beautiful terminal rendering
         let skin = create_skin();
         let rendered = skin.term_text(markdown);
@@ -83,13 +83,6 @@ pub fn render_markdown(markdown: &str, output: &mut dyn Write) -> io::Result<()>
         // Plain markdown for files/pipes
         write!(output, "{}", markdown)
     }
-}
-
-/// Check if the output appears to be stdout (heuristic based on pointer comparison isn't reliable,
-/// so we use a separate function that takes a flag)
-fn output_is_stdout(_output: &dyn Write) -> bool {
-    // This is called only when we know we're writing to stdout in the command handlers
-    true
 }
 
 /// Render markdown to terminal, with explicit TTY flag

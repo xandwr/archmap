@@ -35,6 +35,42 @@ impl PythonParser {
             text.lines().next().map(|s| s.trim().to_string())
         }
     }
+
+    /// Handle a function definition node, adding it to the module.
+    fn handle_function(node: &Node, source_bytes: &[u8], source: &str, module: &mut Module) {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            if let Ok(name) = name_node.utf8_text(source_bytes) {
+                let visibility = Self::get_visibility(name);
+                let signature = Self::extract_signature(node, source);
+
+                module.add_definition(Definition {
+                    name: name.to_string(),
+                    kind: DefinitionKind::Function,
+                    line: node.start_position().row + 1,
+                    visibility,
+                    signature,
+                });
+            }
+        }
+    }
+
+    /// Handle a class definition node, adding it to the module.
+    fn handle_class(node: &Node, source_bytes: &[u8], source: &str, module: &mut Module) {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            if let Ok(name) = name_node.utf8_text(source_bytes) {
+                let visibility = Self::get_visibility(name);
+                let signature = Self::extract_signature(node, source);
+
+                module.add_definition(Definition {
+                    name: name.to_string(),
+                    kind: DefinitionKind::Class,
+                    line: node.start_position().row + 1,
+                    visibility,
+                    signature,
+                });
+            }
+        }
+    }
 }
 
 impl LanguageParser for PythonParser {
@@ -78,44 +114,10 @@ impl LanguageParser for PythonParser {
                     }
                 }
                 "function_definition" => {
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            let visibility = Self::get_visibility(name);
-                            let signature = Self::extract_signature(&node, source);
-
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Function,
-                                line: node.start_position().row + 1,
-                                visibility,
-                                signature,
-                            });
-                            // In Python, top-level functions are typically exported
-                            if visibility == Visibility::Public {
-                                module.exports.push(name.to_string());
-                            }
-                        }
-                    }
+                    Self::handle_function(&node, source_bytes, source, &mut module);
                 }
                 "class_definition" => {
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            let visibility = Self::get_visibility(name);
-                            let signature = Self::extract_signature(&node, source);
-
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Class,
-                                line: node.start_position().row + 1,
-                                visibility,
-                                signature,
-                            });
-                            // In Python, top-level classes are typically exported
-                            if visibility == Visibility::Public {
-                                module.exports.push(name.to_string());
-                            }
-                        }
-                    }
+                    Self::handle_class(&node, source_bytes, source, &mut module);
                 }
                 "decorated_definition" => {
                     // Handle decorated functions/classes
@@ -123,42 +125,10 @@ impl LanguageParser for PythonParser {
                     for child in node.children(&mut child_cursor) {
                         match child.kind() {
                             "function_definition" => {
-                                if let Some(name_node) = child.child_by_field_name("name") {
-                                    if let Ok(name) = name_node.utf8_text(source_bytes) {
-                                        let visibility = Self::get_visibility(name);
-                                        let signature = Self::extract_signature(&child, source);
-
-                                        module.definitions.push(Definition {
-                                            name: name.to_string(),
-                                            kind: DefinitionKind::Function,
-                                            line: child.start_position().row + 1,
-                                            visibility,
-                                            signature,
-                                        });
-                                        if visibility == Visibility::Public {
-                                            module.exports.push(name.to_string());
-                                        }
-                                    }
-                                }
+                                Self::handle_function(&child, source_bytes, source, &mut module);
                             }
                             "class_definition" => {
-                                if let Some(name_node) = child.child_by_field_name("name") {
-                                    if let Ok(name) = name_node.utf8_text(source_bytes) {
-                                        let visibility = Self::get_visibility(name);
-                                        let signature = Self::extract_signature(&child, source);
-
-                                        module.definitions.push(Definition {
-                                            name: name.to_string(),
-                                            kind: DefinitionKind::Class,
-                                            line: child.start_position().row + 1,
-                                            visibility,
-                                            signature,
-                                        });
-                                        if visibility == Visibility::Public {
-                                            module.exports.push(name.to_string());
-                                        }
-                                    }
-                                }
+                                Self::handle_class(&child, source_bytes, source, &mut module);
                             }
                             _ => {}
                         }

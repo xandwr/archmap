@@ -31,6 +31,28 @@ impl RustParser {
         }
         Visibility::Private
     }
+
+    /// Extract a named definition from a node (struct, enum, trait, type, const, static).
+    /// Returns None if the name cannot be extracted.
+    fn extract_named_definition(
+        node: &Node,
+        source: &str,
+        source_bytes: &[u8],
+        kind: DefinitionKind,
+    ) -> Option<Definition> {
+        let visibility = Self::get_visibility(node, source_bytes);
+        let signature = extract_full_definition(node, source);
+        let name_node = node.child_by_field_name("name")?;
+        let name = name_node.utf8_text(source_bytes).ok()?;
+
+        Some(Definition {
+            name: name.to_string(),
+            kind,
+            line: node.start_position().row + 1,
+            visibility,
+            signature,
+        })
+    }
 }
 
 impl LanguageParser for RustParser {
@@ -70,74 +92,44 @@ impl LanguageParser for RustParser {
 
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.definitions.push(Definition {
+                            module.add_definition(Definition {
                                 name: name.to_string(),
                                 kind: DefinitionKind::Function,
                                 line: node.start_position().row + 1,
                                 visibility,
                                 signature,
                             });
-                            if visibility == Visibility::Public {
-                                module.exports.push(name.to_string());
-                            }
                         }
                     }
                 }
                 "struct_item" => {
-                    let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = extract_full_definition(&node, source);
-
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Struct,
-                                line: node.start_position().row + 1,
-                                visibility,
-                                signature,
-                            });
-                            if visibility == Visibility::Public {
-                                module.exports.push(name.to_string());
-                            }
-                        }
+                    if let Some(def) = Self::extract_named_definition(
+                        &node,
+                        source,
+                        source_bytes,
+                        DefinitionKind::Struct,
+                    ) {
+                        module.add_definition(def);
                     }
                 }
                 "enum_item" => {
-                    let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = extract_full_definition(&node, source);
-
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Enum,
-                                line: node.start_position().row + 1,
-                                visibility,
-                                signature,
-                            });
-                            if visibility == Visibility::Public {
-                                module.exports.push(name.to_string());
-                            }
-                        }
+                    if let Some(def) = Self::extract_named_definition(
+                        &node,
+                        source,
+                        source_bytes,
+                        DefinitionKind::Enum,
+                    ) {
+                        module.add_definition(def);
                     }
                 }
                 "trait_item" => {
-                    let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = extract_full_definition(&node, source);
-
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Trait,
-                                line: node.start_position().row + 1,
-                                visibility,
-                                signature,
-                            });
-                            if visibility == Visibility::Public {
-                                module.exports.push(name.to_string());
-                            }
-                        }
+                    if let Some(def) = Self::extract_named_definition(
+                        &node,
+                        source,
+                        source_bytes,
+                        DefinitionKind::Trait,
+                    ) {
+                        module.add_definition(def);
                     }
                 }
                 "impl_item" => {
@@ -157,52 +149,35 @@ impl LanguageParser for RustParser {
                             .to_string();
 
                         if !name.is_empty() {
+                            // impl blocks don't have visibility, so we push directly
                             module.definitions.push(Definition {
                                 name,
                                 kind: DefinitionKind::Impl,
                                 line: node.start_position().row + 1,
-                                visibility: Visibility::Private, // impl blocks don't have visibility
+                                visibility: Visibility::Private,
                                 signature,
                             });
                         }
                     }
                 }
                 "type_item" => {
-                    let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = extract_full_definition(&node, source);
-
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Type,
-                                line: node.start_position().row + 1,
-                                visibility,
-                                signature,
-                            });
-                            if visibility == Visibility::Public {
-                                module.exports.push(name.to_string());
-                            }
-                        }
+                    if let Some(def) = Self::extract_named_definition(
+                        &node,
+                        source,
+                        source_bytes,
+                        DefinitionKind::Type,
+                    ) {
+                        module.add_definition(def);
                     }
                 }
                 "const_item" | "static_item" => {
-                    let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = extract_full_definition(&node, source);
-
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Type, // Using Type for constants
-                                line: node.start_position().row + 1,
-                                visibility,
-                                signature,
-                            });
-                            if visibility == Visibility::Public {
-                                module.exports.push(name.to_string());
-                            }
-                        }
+                    if let Some(def) = Self::extract_named_definition(
+                        &node,
+                        source,
+                        source_bytes,
+                        DefinitionKind::Constant,
+                    ) {
+                        module.add_definition(def);
                     }
                 }
                 "mod_item" => {

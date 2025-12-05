@@ -59,16 +59,17 @@ impl LanguageParser for TypeScriptParser {
                     }
                 }
                 "lexical_declaration" | "variable_declaration" => {
-                    // Handle const/let/var declarations (not handled by add_definition)
+                    // Handle const/let/var declarations (not handled by add_ts_definition)
                     let mut child_cursor = node.walk();
                     for child in node.children(&mut child_cursor) {
                         if child.kind() == "variable_declarator" {
                             if let Some(name_node) = child.child_by_field_name("name") {
                                 if let Ok(name) = name_node.utf8_text(source_bytes) {
                                     let signature = extract_full_definition(&node, source);
+                                    // Private declarations don't export, so push directly
                                     module.definitions.push(Definition {
                                         name: name.to_string(),
-                                        kind: DefinitionKind::Function, // Could be a const function
+                                        kind: DefinitionKind::Constant,
                                         line: node.start_position().row + 1,
                                         visibility: Visibility::Private,
                                         signature,
@@ -113,76 +114,30 @@ fn add_definition(
         Visibility::Private
     };
 
-    match node.kind() {
-        "function_declaration" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                if let Ok(name) = name_node.utf8_text(source_bytes) {
-                    let signature = extract_signature_to_brace(node, source);
-                    module.definitions.push(Definition {
-                        name: name.to_string(),
-                        kind: DefinitionKind::Function,
-                        line: node.start_position().row + 1,
-                        visibility,
-                        signature,
-                    });
-                    if is_exported {
-                        module.exports.push(name.to_string());
-                    }
-                }
-            }
+    let (kind, use_signature_to_brace) = match node.kind() {
+        "function_declaration" => (DefinitionKind::Function, true),
+        "class_declaration" => (DefinitionKind::Class, false),
+        "interface_declaration" => (DefinitionKind::Interface, false),
+        "type_alias_declaration" => (DefinitionKind::Type, false),
+        _ => return,
+    };
+
+    if let Some(name_node) = node.child_by_field_name("name") {
+        if let Ok(name) = name_node.utf8_text(source_bytes) {
+            let signature = if use_signature_to_brace {
+                extract_signature_to_brace(node, source)
+            } else {
+                extract_full_definition(node, source)
+            };
+
+            module.add_definition(Definition {
+                name: name.to_string(),
+                kind,
+                line: node.start_position().row + 1,
+                visibility,
+                signature,
+            });
         }
-        "class_declaration" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                if let Ok(name) = name_node.utf8_text(source_bytes) {
-                    let signature = extract_full_definition(node, source);
-                    module.definitions.push(Definition {
-                        name: name.to_string(),
-                        kind: DefinitionKind::Class,
-                        line: node.start_position().row + 1,
-                        visibility,
-                        signature,
-                    });
-                    if is_exported {
-                        module.exports.push(name.to_string());
-                    }
-                }
-            }
-        }
-        "interface_declaration" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                if let Ok(name) = name_node.utf8_text(source_bytes) {
-                    let signature = extract_full_definition(node, source);
-                    module.definitions.push(Definition {
-                        name: name.to_string(),
-                        kind: DefinitionKind::Interface,
-                        line: node.start_position().row + 1,
-                        visibility,
-                        signature,
-                    });
-                    if is_exported {
-                        module.exports.push(name.to_string());
-                    }
-                }
-            }
-        }
-        "type_alias_declaration" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                if let Ok(name) = name_node.utf8_text(source_bytes) {
-                    let signature = extract_full_definition(node, source);
-                    module.definitions.push(Definition {
-                        name: name.to_string(),
-                        kind: DefinitionKind::Type,
-                        line: node.start_position().row + 1,
-                        visibility,
-                        signature,
-                    });
-                    if is_exported {
-                        module.exports.push(name.to_string());
-                    }
-                }
-            }
-        }
-        _ => {}
     }
 }
 

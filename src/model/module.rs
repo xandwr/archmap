@@ -43,6 +43,7 @@ pub enum DefinitionKind {
     Class,
     Interface,
     Type,
+    Constant,
 }
 
 impl Module {
@@ -61,5 +62,13 @@ impl Module {
             exports: Vec::new(),
             definitions: Vec::new(),
         }
+    }
+
+    /// Add a definition to the module, automatically updating exports if public.
+    pub fn add_definition(&mut self, def: Definition) {
+        if def.visibility == Visibility::Public {
+            self.exports.push(def.name.clone());
+        }
+        self.definitions.push(def);
     }
 }
