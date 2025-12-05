@@ -1,6 +1,30 @@
 # Archmap Configuration
 # This file configures architectural analysis for your project.
 
+# Expected High Coupling
+# Glob patterns for modules where high fan-in is expected and shouldn't be flagged.
+# Core domain models, config files, and index/entry modules typically have high coupling.
+# Default patterns cover common conventions across languages.
+expected_high_coupling = [
+    "**/model/**",
+    "**/models/**",
+    "**/types/**",
+    "**/config.rs",
+    "**/config.ts",
+    "**/config.py",
+    "**/lib.rs",
+    "**/mod.rs",
+    "**/index.ts",
+    "**/index.js",
+    "**/__init__.py",
+    # CLI argument definitions - naturally imported by all command handlers
+    "**/cli.rs",
+    # Terminal styling utilities - stable API used across the codebase
+    "**/style.rs",
+    # Centralized filesystem abstraction
+    "**/fs.rs",
+]
+
 [thresholds]
 # Maximum lines before a file is flagged as a "god object"
 # Default: 500
@@ -33,28 +57,6 @@ fat_module_lines = 400
 fat_module_private_functions = 8
 # Default: 100 lines per export maximum
 fat_module_lines_per_export = 100.0
-
-# Expected High Coupling
-# Glob patterns for modules where high fan-in is expected and shouldn't be flagged.
-# Core domain models, config files, and index/entry modules typically have high coupling.
-# Default patterns cover common conventions across languages.
-expected_high_coupling = [
-    "**/model/**",
-    "**/models/**",
-    "**/types/**",
-    "**/config.rs",
-    "**/config.ts",
-    "**/config.py",
-    "**/lib.rs",
-    "**/mod.rs",
-    "**/index.ts",
-    "**/index.js",
-    "**/__init__.py",
-    # CLI argument definitions - naturally imported by all command handlers
-    "**/cli.rs",
-    # Terminal styling utilities - stable API used across the codebase
-    "**/style.rs",
-]
 
 # Architectural Boundaries
 # Define patterns that indicate crossing architectural boundaries.
