@@ -1,47 +1,19 @@
+use crate::define_parser;
 use crate::model::{Definition, DefinitionKind, Module, Visibility};
-use crate::parser::{LanguageParser, ParseError};
-use std::cell::RefCell;
+use crate::parser::{
+    LanguageParser, ParseError, extract_full_definition, extract_signature_to_brace,
+};
 use std::path::Path;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
-thread_local! {
-    static TS_PARSER: RefCell<Parser> = RefCell::new({
-        let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()).expect("Failed to set TS language");
-        parser
-    });
-    static TSX_PARSER: RefCell<Parser> = RefCell::new({
-        let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_typescript::LANGUAGE_TSX.into()).expect("Failed to set TSX language");
-        parser
-    });
-}
+define_parser!(TS_PARSER, tree_sitter_typescript::LANGUAGE_TYPESCRIPT);
+define_parser!(TSX_PARSER, tree_sitter_typescript::LANGUAGE_TSX);
 
 pub struct TypeScriptParser;
 
 impl TypeScriptParser {
     pub fn new() -> Self {
         Self
-    }
-
-    /// Extract signature from node up to opening brace
-    fn extract_signature(node: &Node, source: &str) -> Option<String> {
-        let start = node.start_byte();
-        let end = node.end_byte();
-        let text = &source[start..end];
-
-        if let Some(brace_pos) = text.find('{') {
-            Some(text[..brace_pos].trim().to_string())
-        } else {
-            text.lines().next().map(|s| s.trim().to_string())
-        }
-    }
-
-    /// Extract full definition
-    fn extract_full_definition(node: &Node, source: &str) -> Option<String> {
-        let start = node.start_byte();
-        let end = node.end_byte();
-        Some(source[start..end].to_string())
     }
 }
 
@@ -73,7 +45,6 @@ impl LanguageParser for TypeScriptParser {
             match node.kind() {
                 "import_statement" => {
                     if let Ok(text) = node.utf8_text(source_bytes) {
-                        // Extract the import path
                         let import = extract_import_path(text);
                         if !import.is_empty() {
                             module.imports.push(import);
@@ -84,73 +55,17 @@ impl LanguageParser for TypeScriptParser {
                     // Handle export declarations - these are public
                     let mut child_cursor = node.walk();
                     for child in node.children(&mut child_cursor) {
-                        extract_definition(&child, source_bytes, source, &mut module, true);
-                    }
-                }
-                "function_declaration" => {
-                    let signature = Self::extract_signature(&node, source);
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Function,
-                                line: node.start_position().row + 1,
-                                visibility: Visibility::Private, // Not exported
-                                signature,
-                            });
-                        }
-                    }
-                }
-                "class_declaration" => {
-                    let signature = Self::extract_full_definition(&node, source);
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Class,
-                                line: node.start_position().row + 1,
-                                visibility: Visibility::Private,
-                                signature,
-                            });
-                        }
-                    }
-                }
-                "interface_declaration" => {
-                    let signature = Self::extract_full_definition(&node, source);
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Interface,
-                                line: node.start_position().row + 1,
-                                visibility: Visibility::Private,
-                                signature,
-                            });
-                        }
-                    }
-                }
-                "type_alias_declaration" => {
-                    let signature = Self::extract_full_definition(&node, source);
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        if let Ok(name) = name_node.utf8_text(source_bytes) {
-                            module.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Type,
-                                line: node.start_position().row + 1,
-                                visibility: Visibility::Private,
-                                signature,
-                            });
-                        }
+                        add_definition(&child, source_bytes, source, &mut module, true);
                     }
                 }
                 "lexical_declaration" | "variable_declaration" => {
-                    // Handle const/let/var declarations
+                    // Handle const/let/var declarations (not handled by add_definition)
                     let mut child_cursor = node.walk();
                     for child in node.children(&mut child_cursor) {
                         if child.kind() == "variable_declarator" {
                             if let Some(name_node) = child.child_by_field_name("name") {
                                 if let Ok(name) = name_node.utf8_text(source_bytes) {
-                                    let signature = Self::extract_full_definition(&node, source);
+                                    let signature = extract_full_definition(&node, source);
                                     module.definitions.push(Definition {
                                         name: name.to_string(),
                                         kind: DefinitionKind::Function, // Could be a const function
@@ -163,7 +78,8 @@ impl LanguageParser for TypeScriptParser {
                         }
                     }
                 }
-                _ => {}
+                // Non-exported declarations (function, class, interface, type) use shared helper
+                _ => add_definition(&node, source_bytes, source, &mut module, false),
             }
         }
 
@@ -182,7 +98,9 @@ fn extract_import_path(import_text: &str) -> String {
     String::new()
 }
 
-fn extract_definition(
+/// Add a definition to the module if the node is a recognized declaration type.
+/// Handles function, class, interface, and type alias declarations.
+fn add_definition(
     node: &Node,
     source_bytes: &[u8],
     source: &str,
@@ -199,7 +117,7 @@ fn extract_definition(
         "function_declaration" => {
             if let Some(name_node) = node.child_by_field_name("name") {
                 if let Ok(name) = name_node.utf8_text(source_bytes) {
-                    let signature = TypeScriptParser::extract_signature(node, source);
+                    let signature = extract_signature_to_brace(node, source);
                     module.definitions.push(Definition {
                         name: name.to_string(),
                         kind: DefinitionKind::Function,
@@ -216,7 +134,7 @@ fn extract_definition(
         "class_declaration" => {
             if let Some(name_node) = node.child_by_field_name("name") {
                 if let Ok(name) = name_node.utf8_text(source_bytes) {
-                    let signature = TypeScriptParser::extract_full_definition(node, source);
+                    let signature = extract_full_definition(node, source);
                     module.definitions.push(Definition {
                         name: name.to_string(),
                         kind: DefinitionKind::Class,
@@ -233,7 +151,7 @@ fn extract_definition(
         "interface_declaration" => {
             if let Some(name_node) = node.child_by_field_name("name") {
                 if let Ok(name) = name_node.utf8_text(source_bytes) {
-                    let signature = TypeScriptParser::extract_full_definition(node, source);
+                    let signature = extract_full_definition(node, source);
                     module.definitions.push(Definition {
                         name: name.to_string(),
                         kind: DefinitionKind::Interface,
@@ -250,7 +168,7 @@ fn extract_definition(
         "type_alias_declaration" => {
             if let Some(name_node) = node.child_by_field_name("name") {
                 if let Ok(name) = name_node.utf8_text(source_bytes) {
-                    let signature = TypeScriptParser::extract_full_definition(node, source);
+                    let signature = extract_full_definition(node, source);
                     module.definitions.push(Definition {
                         name: name.to_string(),
                         kind: DefinitionKind::Type,

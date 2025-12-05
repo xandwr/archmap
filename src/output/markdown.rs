@@ -1,5 +1,5 @@
-use crate::model::{AnalysisResult, IssueKind, IssueSeverity};
-use crate::output::OutputFormatter;
+use crate::model::{AnalysisResult, Issue, IssueKind, IssueSeverity};
+use crate::output::{OutputFormatter, relative_path};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -17,14 +17,57 @@ impl MarkdownOutput {
     }
 
     fn relative_path(&self, path: &Path) -> String {
-        if let Some(ref root) = self.project_root {
-            path.strip_prefix(root)
-                .unwrap_or(path)
-                .display()
-                .to_string()
-        } else {
-            path.display().to_string()
+        relative_path(path, self.project_root.as_ref())
+    }
+
+    /// Write a section with issues that show message and optional suggestion (no location).
+    fn write_message_section<W: Write>(
+        &self,
+        writer: &mut W,
+        header: &str,
+        issues: &[&&Issue],
+    ) -> std::io::Result<()> {
+        if issues.is_empty() {
+            return Ok(());
         }
+        writeln!(writer, "{}\n", header)?;
+        for issue in issues {
+            writeln!(writer, "- {}", issue.message)?;
+            if let Some(ref suggestion) = issue.suggestion {
+                writeln!(writer, "  → {}", suggestion)?;
+            }
+        }
+        writeln!(writer)
+    }
+
+    /// Write a section with issues that show location path and message.
+    fn write_location_section<W: Write>(
+        &self,
+        writer: &mut W,
+        header: &str,
+        issues: &[&&Issue],
+        include_suggestion: bool,
+    ) -> std::io::Result<()> {
+        if issues.is_empty() {
+            return Ok(());
+        }
+        writeln!(writer, "{}\n", header)?;
+        for issue in issues {
+            if let Some(loc) = issue.locations.first() {
+                writeln!(
+                    writer,
+                    "- `{}` - {}",
+                    self.relative_path(&loc.path),
+                    issue.message
+                )?;
+            }
+            if include_suggestion {
+                if let Some(ref suggestion) = issue.suggestion {
+                    writeln!(writer, "  → {}", suggestion)?;
+                }
+            }
+        }
+        writeln!(writer)
     }
 }
 
@@ -73,66 +116,28 @@ impl OutputFormatter for MarkdownOutput {
 
         writeln!(writer, "\n## Issues Found\n")?;
 
-        // Circular Dependencies (Error severity)
+        // Circular Dependencies (Error severity) - message only
         let circular: Vec<_> = filtered_issues
             .iter()
             .filter(|i| matches!(i.kind, IssueKind::CircularDependency))
             .collect();
+        self.write_message_section(writer, "### 🔴 Circular Dependencies", &circular)?;
 
-        if !circular.is_empty() {
-            writeln!(writer, "### 🔴 Circular Dependencies\n")?;
-            for issue in circular {
-                writeln!(writer, "- {}", issue.message)?;
-                if let Some(ref suggestion) = issue.suggestion {
-                    writeln!(writer, "  → {}", suggestion)?;
-                }
-            }
-            writeln!(writer)?;
-        }
-
-        // God Objects
+        // God Objects - location + message, no suggestion
         let god_objects: Vec<_> = filtered_issues
             .iter()
             .filter(|i| matches!(i.kind, IssueKind::GodObject))
             .collect();
+        self.write_location_section(writer, "### 🟡 God Objects", &god_objects, false)?;
 
-        if !god_objects.is_empty() {
-            writeln!(writer, "### 🟡 God Objects\n")?;
-            for issue in god_objects {
-                if let Some(loc) = issue.locations.first() {
-                    writeln!(
-                        writer,
-                        "- `{}` - {}",
-                        self.relative_path(&loc.path),
-                        issue.message
-                    )?;
-                }
-            }
-            writeln!(writer)?;
-        }
-
-        // High Coupling
+        // High Coupling - location + message, no suggestion
         let coupling: Vec<_> = filtered_issues
             .iter()
             .filter(|i| matches!(i.kind, IssueKind::HighCoupling))
             .collect();
+        self.write_location_section(writer, "### 🟡 High Coupling", &coupling, false)?;
 
-        if !coupling.is_empty() {
-            writeln!(writer, "### 🟡 High Coupling\n")?;
-            for issue in coupling {
-                if let Some(loc) = issue.locations.first() {
-                    writeln!(
-                        writer,
-                        "- `{}` - {}",
-                        self.relative_path(&loc.path),
-                        issue.message
-                    )?;
-                }
-            }
-            writeln!(writer)?;
-        }
-
-        // Boundary Violations
+        // Boundary Violations - special formatting (keep inline)
         let boundary_violations: Vec<_> = filtered_issues
             .iter()
             .filter(|i| matches!(i.kind, IssueKind::BoundaryViolation { .. }))
@@ -149,7 +154,6 @@ impl OutputFormatter for MarkdownOutput {
                         issue.locations.len()
                     )?;
 
-                    // Show first few locations
                     for loc in issue.locations.iter().take(5) {
                         let line_info = loc.line.map(|l| format!(":{}", l)).unwrap_or_default();
                         let context = loc
@@ -178,70 +182,31 @@ impl OutputFormatter for MarkdownOutput {
             }
         }
 
-        // Deep Dependency Chains
+        // Deep Dependency Chains - message only
         let deep_chains: Vec<_> = filtered_issues
             .iter()
             .filter(|i| matches!(i.kind, IssueKind::DeepDependencyChain { .. }))
             .collect();
+        self.write_message_section(writer, "### 🟡 Deep Dependency Chains", &deep_chains)?;
 
-        if !deep_chains.is_empty() {
-            writeln!(writer, "### 🟡 Deep Dependency Chains\n")?;
-            for issue in deep_chains {
-                writeln!(writer, "- {}", issue.message)?;
-                if let Some(ref suggestion) = issue.suggestion {
-                    writeln!(writer, "  → {}", suggestion)?;
-                }
-            }
-            writeln!(writer)?;
-        }
-
-        // Low Cohesion
+        // Low Cohesion - location + message + suggestion
         let low_cohesion: Vec<_> = filtered_issues
             .iter()
             .filter(|i| matches!(i.kind, IssueKind::LowCohesion { .. }))
             .collect();
+        self.write_location_section(writer, "### 🔵 Low Cohesion Modules", &low_cohesion, true)?;
 
-        if !low_cohesion.is_empty() {
-            writeln!(writer, "### 🔵 Low Cohesion Modules\n")?;
-            for issue in low_cohesion {
-                if let Some(loc) = issue.locations.first() {
-                    writeln!(
-                        writer,
-                        "- `{}` - {}",
-                        self.relative_path(&loc.path),
-                        issue.message
-                    )?;
-                }
-                if let Some(ref suggestion) = issue.suggestion {
-                    writeln!(writer, "  → {}", suggestion)?;
-                }
-            }
-            writeln!(writer)?;
-        }
-
-        // Fat Modules
+        // Fat Modules - location + message + suggestion
         let fat_modules: Vec<_> = filtered_issues
             .iter()
             .filter(|i| matches!(i.kind, IssueKind::FatModule { .. }))
             .collect();
-
-        if !fat_modules.is_empty() {
-            writeln!(writer, "### 🔵 Fat Modules (Hidden Complexity)\n")?;
-            for issue in fat_modules {
-                if let Some(loc) = issue.locations.first() {
-                    writeln!(
-                        writer,
-                        "- `{}` - {}",
-                        self.relative_path(&loc.path),
-                        issue.message
-                    )?;
-                }
-                if let Some(ref suggestion) = issue.suggestion {
-                    writeln!(writer, "  → {}", suggestion)?;
-                }
-            }
-            writeln!(writer)?;
-        }
+        self.write_location_section(
+            writer,
+            "### 🔵 Fat Modules (Hidden Complexity)",
+            &fat_modules,
+            true,
+        )?;
 
         Ok(())
     }

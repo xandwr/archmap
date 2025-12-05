@@ -1,16 +1,12 @@
+use crate::define_parser;
 use crate::model::{Definition, DefinitionKind, Module, Visibility};
-use crate::parser::{LanguageParser, ParseError};
-use std::cell::RefCell;
+use crate::parser::{
+    LanguageParser, ParseError, extract_full_definition, extract_signature_to_brace,
+};
 use std::path::Path;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
-thread_local! {
-    static RUST_PARSER: RefCell<Parser> = RefCell::new({
-        let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).expect("Failed to set Rust language");
-        parser
-    });
-}
+define_parser!(RUST_PARSER, tree_sitter_rust::LANGUAGE);
 
 pub struct RustParser;
 
@@ -34,30 +30,6 @@ impl RustParser {
             }
         }
         Visibility::Private
-    }
-
-    /// Extract signature from a node up to the opening brace
-    fn extract_signature(node: &Node, source: &str) -> Option<String> {
-        let start = node.start_byte();
-        let end = node.end_byte();
-        let text = &source[start..end];
-
-        // Find the opening brace and truncate there
-        if let Some(brace_pos) = text.find('{') {
-            let sig = text[..brace_pos].trim();
-            Some(sig.to_string())
-        } else {
-            // No brace (e.g., unit struct or semicolon-terminated)
-            let sig = text.trim_end_matches(';').trim();
-            Some(sig.to_string())
-        }
-    }
-
-    /// Extract full definition including body (for structs, enums)
-    fn extract_full_definition(node: &Node, source: &str) -> Option<String> {
-        let start = node.start_byte();
-        let end = node.end_byte();
-        Some(source[start..end].to_string())
     }
 }
 
@@ -94,7 +66,7 @@ impl LanguageParser for RustParser {
                 }
                 "function_item" => {
                     let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = Self::extract_signature(&node, source);
+                    let signature = extract_signature_to_brace(&node, source);
 
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
@@ -113,7 +85,7 @@ impl LanguageParser for RustParser {
                 }
                 "struct_item" => {
                     let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = Self::extract_full_definition(&node, source);
+                    let signature = extract_full_definition(&node, source);
 
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
@@ -132,7 +104,7 @@ impl LanguageParser for RustParser {
                 }
                 "enum_item" => {
                     let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = Self::extract_full_definition(&node, source);
+                    let signature = extract_full_definition(&node, source);
 
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
@@ -151,7 +123,7 @@ impl LanguageParser for RustParser {
                 }
                 "trait_item" => {
                     let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = Self::extract_full_definition(&node, source);
+                    let signature = extract_full_definition(&node, source);
 
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
@@ -170,7 +142,7 @@ impl LanguageParser for RustParser {
                 }
                 "impl_item" => {
                     // For impl, try to get the type being implemented
-                    let signature = Self::extract_signature(&node, source);
+                    let signature = extract_signature_to_brace(&node, source);
 
                     if let Ok(impl_text) = node.utf8_text(source_bytes) {
                         let name = impl_text
@@ -197,7 +169,7 @@ impl LanguageParser for RustParser {
                 }
                 "type_item" => {
                     let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = Self::extract_full_definition(&node, source);
+                    let signature = extract_full_definition(&node, source);
 
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {
@@ -216,7 +188,7 @@ impl LanguageParser for RustParser {
                 }
                 "const_item" | "static_item" => {
                     let visibility = Self::get_visibility(&node, source_bytes);
-                    let signature = Self::extract_full_definition(&node, source);
+                    let signature = extract_full_definition(&node, source);
 
                     if let Some(name_node) = node.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source_bytes) {

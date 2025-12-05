@@ -1,16 +1,10 @@
+use crate::define_parser;
 use crate::model::{Definition, DefinitionKind, Module, Visibility};
 use crate::parser::{LanguageParser, ParseError};
-use std::cell::RefCell;
 use std::path::Path;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
-thread_local! {
-    static PYTHON_PARSER: RefCell<Parser> = RefCell::new({
-        let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_python::LANGUAGE.into()).expect("Failed to set Python language");
-        parser
-    });
-}
+define_parser!(PYTHON_PARSER, tree_sitter_python::LANGUAGE);
 
 pub struct PythonParser;
 

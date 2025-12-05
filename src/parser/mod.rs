@@ -1,3 +1,4 @@
+mod common;
 mod python;
 mod rust;
 mod typescript;
@@ -6,6 +7,7 @@ use crate::model::Module;
 use std::path::Path;
 use thiserror::Error;
 
+pub use common::{extract_full_definition, extract_signature_to_brace};
 pub use python::PythonParser;
 pub use rust::RustParser;
 pub use typescript::TypeScriptParser;
