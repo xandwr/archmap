@@ -264,11 +264,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parses_main_rs_functions() {
+    fn test_parses_analyze_command() {
+        // Test against a file with substantial content (commands/analyze.rs has the most logic)
         let parser = RustParser::new();
-        let source = std::fs::read_to_string("src/main.rs").unwrap();
+        let source = std::fs::read_to_string("src/commands/analyze.rs").unwrap();
         let module = parser
-            .parse_module(Path::new("src/main.rs"), &source)
+            .parse_module(Path::new("src/commands/analyze.rs"), &source)
             .unwrap();
 
         println!("Definitions found: {}", module.definitions.len());
@@ -279,10 +280,10 @@ mod tests {
             );
         }
 
-        // main.rs should have functions like main, cmd_init, cmd_analyze, etc.
+        // analyze.rs should have functions like cmd_analyze, run_analysis, run_watch_mode, etc.
         assert!(
             !module.definitions.is_empty(),
-            "Should find function definitions in main.rs"
+            "Should find function definitions in commands/analyze.rs"
         );
 
         let fn_count = module
@@ -291,8 +292,8 @@ mod tests {
             .filter(|d| d.kind == DefinitionKind::Function)
             .count();
         assert!(
-            fn_count > 5,
-            "main.rs should have more than 5 functions, found {}",
+            fn_count >= 4,
+            "commands/analyze.rs should have at least 4 functions, found {}",
             fn_count
         );
     }
