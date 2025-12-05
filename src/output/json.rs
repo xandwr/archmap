@@ -2,18 +2,32 @@ use crate::model::AnalysisResult;
 use crate::output::OutputFormatter;
 use serde::Serialize;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
-pub struct JsonOutput;
+pub struct JsonOutput {
+    project_root: Option<PathBuf>,
+}
 
 impl JsonOutput {
-    pub fn new() -> Self {
-        Self
+    pub fn new(project_root: Option<PathBuf>) -> Self {
+        Self { project_root }
+    }
+
+    fn relative_path(&self, path: &Path) -> String {
+        if let Some(ref root) = self.project_root {
+            path.strip_prefix(root)
+                .unwrap_or(path)
+                .display()
+                .to_string()
+        } else {
+            path.display().to_string()
+        }
     }
 }
 
 impl Default for JsonOutput {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -57,7 +71,7 @@ impl OutputFormatter for JsonOutput {
                 .modules
                 .iter()
                 .map(|m| JsonModule {
-                    path: m.path.display().to_string(),
+                    path: self.relative_path(&m.path),
                     name: &m.name,
                     lines: m.lines,
                     imports: &m.imports,
@@ -75,7 +89,7 @@ impl OutputFormatter for JsonOutput {
                         .locations
                         .iter()
                         .map(|l| JsonLocation {
-                            path: l.path.display().to_string(),
+                            path: self.relative_path(&l.path),
                             line: l.line,
                             context: l.context.as_deref(),
                         })

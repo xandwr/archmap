@@ -16,6 +16,8 @@ pub enum IssueKind {
     GodObject,
     HighCoupling,
     BoundaryViolation { boundary_name: String },
+    DeepDependencyChain { depth: usize },
+    LowCohesion { score: f64 },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -109,6 +111,62 @@ impl Issue {
                 boundary_name, location_count
             ),
             suggestion: Some(suggestion),
+        }
+    }
+
+    pub fn deep_dependency_chain(chain: Vec<PathBuf>, max_depth: usize) -> Self {
+        let depth = chain.len();
+        let locations: Vec<Location> = chain
+            .iter()
+            .map(|p| Location {
+                path: p.clone(),
+                line: None,
+                context: None,
+            })
+            .collect();
+
+        let chain_str: Vec<_> = chain
+            .iter()
+            .filter_map(|p| p.file_stem().and_then(|s| s.to_str()))
+            .collect();
+
+        Self {
+            kind: IssueKind::DeepDependencyChain { depth },
+            severity: IssueSeverity::Warn,
+            locations,
+            message: format!(
+                "Dependency chain of depth {} (threshold: {}): {}",
+                depth,
+                max_depth,
+                chain_str.join(" → ")
+            ),
+            suggestion: Some(
+                "Consider introducing an abstraction layer to reduce coupling depth".to_string(),
+            ),
+        }
+    }
+
+    pub fn low_cohesion(
+        path: PathBuf,
+        score: f64,
+        internal_imports: usize,
+        external_imports: usize,
+    ) -> Self {
+        Self {
+            kind: IssueKind::LowCohesion { score },
+            severity: IssueSeverity::Info,
+            locations: vec![Location {
+                path,
+                line: None,
+                context: None,
+            }],
+            message: format!(
+                "Cohesion score: {:.2} ({} internal, {} external imports)",
+                score, internal_imports, external_imports
+            ),
+            suggestion: Some(
+                "Low cohesion suggests this module may be doing too many unrelated things. Consider splitting into focused modules.".to_string(),
+            ),
         }
     }
 }

@@ -1,12 +1,16 @@
 mod boundary;
 mod circular;
+mod cohesion;
 mod coupling;
+mod depth;
 mod god_object;
 mod graph;
 
 pub use boundary::detect_boundary_violations;
 pub use circular::detect_circular_dependencies;
+pub use cohesion::detect_low_cohesion;
 pub use coupling::detect_high_coupling;
+pub use depth::detect_deep_dependency_chains;
 pub use god_object::detect_god_objects;
 pub use graph::DependencyGraph;
 
@@ -43,6 +47,12 @@ pub fn analyze(path: &Path, config: &Config, registry: &ParserRegistry) -> Analy
 
     // Boundary violations
     issues.extend(detect_boundary_violations(&modules, config));
+
+    // Deep dependency chains
+    issues.extend(detect_deep_dependency_chains(&dep_graph, config));
+
+    // Low cohesion modules
+    issues.extend(detect_low_cohesion(&modules, &dep_graph, config));
 
     AnalysisResult {
         project_name,

@@ -1,14 +1,30 @@
 use crate::model::{AnalysisResult, IssueKind, IssueSeverity};
 use crate::output::OutputFormatter;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 pub struct MarkdownOutput {
     pub min_severity: IssueSeverity,
+    pub project_root: Option<PathBuf>,
 }
 
 impl MarkdownOutput {
-    pub fn new(min_severity: IssueSeverity) -> Self {
-        Self { min_severity }
+    pub fn new(min_severity: IssueSeverity, project_root: Option<PathBuf>) -> Self {
+        Self {
+            min_severity,
+            project_root,
+        }
+    }
+
+    fn relative_path(&self, path: &Path) -> String {
+        if let Some(ref root) = self.project_root {
+            path.strip_prefix(root)
+                .unwrap_or(path)
+                .display()
+                .to_string()
+        } else {
+            path.display().to_string()
+        }
     }
 }
 
@@ -28,13 +44,14 @@ impl OutputFormatter for MarkdownOutput {
                 })
                 .collect();
 
+            let rel_path = self.relative_path(&module.path);
             if imports.is_empty() {
-                writeln!(writer, "- `{}` (no imports)", module.path.display())?;
+                writeln!(writer, "- `{}` (no imports)", rel_path)?;
             } else {
                 writeln!(
                     writer,
                     "- `{}` → imports: [{}]",
-                    module.path.display(),
+                    rel_path,
                     imports.join(", ")
                 )?;
             }
@@ -82,7 +99,12 @@ impl OutputFormatter for MarkdownOutput {
             writeln!(writer, "### 🟡 God Objects\n")?;
             for issue in god_objects {
                 if let Some(loc) = issue.locations.first() {
-                    writeln!(writer, "- `{}` - {}", loc.path.display(), issue.message)?;
+                    writeln!(
+                        writer,
+                        "- `{}` - {}",
+                        self.relative_path(&loc.path),
+                        issue.message
+                    )?;
                 }
             }
             writeln!(writer)?;
@@ -98,7 +120,12 @@ impl OutputFormatter for MarkdownOutput {
             writeln!(writer, "### 🟡 High Coupling\n")?;
             for issue in coupling {
                 if let Some(loc) = issue.locations.first() {
-                    writeln!(writer, "- `{}` - {}", loc.path.display(), issue.message)?;
+                    writeln!(
+                        writer,
+                        "- `{}` - {}",
+                        self.relative_path(&loc.path),
+                        issue.message
+                    )?;
                 }
             }
             writeln!(writer)?;
@@ -130,7 +157,13 @@ impl OutputFormatter for MarkdownOutput {
                             .map(|c| format!(" - `{}`", truncate(c, 50)))
                             .unwrap_or_default();
 
-                        writeln!(writer, "- `{}{}`{}", loc.path.display(), line_info, context)?;
+                        writeln!(
+                            writer,
+                            "- `{}{}`{}",
+                            self.relative_path(&loc.path),
+                            line_info,
+                            context
+                        )?;
                     }
 
                     if issue.locations.len() > 5 {
@@ -142,6 +175,47 @@ impl OutputFormatter for MarkdownOutput {
                     }
                 }
             }
+        }
+
+        // Deep Dependency Chains
+        let deep_chains: Vec<_> = filtered_issues
+            .iter()
+            .filter(|i| matches!(i.kind, IssueKind::DeepDependencyChain { .. }))
+            .collect();
+
+        if !deep_chains.is_empty() {
+            writeln!(writer, "### 🟡 Deep Dependency Chains\n")?;
+            for issue in deep_chains {
+                writeln!(writer, "- {}", issue.message)?;
+                if let Some(ref suggestion) = issue.suggestion {
+                    writeln!(writer, "  → {}", suggestion)?;
+                }
+            }
+            writeln!(writer)?;
+        }
+
+        // Low Cohesion
+        let low_cohesion: Vec<_> = filtered_issues
+            .iter()
+            .filter(|i| matches!(i.kind, IssueKind::LowCohesion { .. }))
+            .collect();
+
+        if !low_cohesion.is_empty() {
+            writeln!(writer, "### 🔵 Low Cohesion Modules\n")?;
+            for issue in low_cohesion {
+                if let Some(loc) = issue.locations.first() {
+                    writeln!(
+                        writer,
+                        "- `{}` - {}",
+                        self.relative_path(&loc.path),
+                        issue.message
+                    )?;
+                }
+                if let Some(ref suggestion) = issue.suggestion {
+                    writeln!(writer, "  → {}", suggestion)?;
+                }
+            }
+            writeln!(writer)?;
         }
 
         Ok(())

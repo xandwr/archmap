@@ -26,6 +26,22 @@ pub struct Cli {
     /// Languages to analyze (comma-separated: rust,typescript,python)
     #[arg(long, value_delimiter = ',')]
     pub lang: Option<Vec<String>>,
+
+    /// Generate a starter .archmap.toml configuration file
+    #[arg(long)]
+    pub init: bool,
+
+    /// Watch for file changes and re-analyze
+    #[arg(short, long)]
+    pub watch: bool,
+
+    /// Maximum dependency chain depth before flagging (default: 5)
+    #[arg(long, default_value = "5")]
+    pub max_depth: usize,
+
+    /// Minimum cohesion score before flagging (0.0-1.0, default: 0.3)
+    #[arg(long, default_value = "0.3")]
+    pub min_cohesion: f64,
 }
 
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
