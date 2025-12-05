@@ -15,9 +15,20 @@ pub enum IssueKind {
     CircularDependency,
     GodObject,
     HighCoupling,
-    BoundaryViolation { boundary_name: String },
-    DeepDependencyChain { depth: usize },
-    LowCohesion { score: f64 },
+    BoundaryViolation {
+        boundary_name: String,
+    },
+    DeepDependencyChain {
+        depth: usize,
+    },
+    LowCohesion {
+        score: f64,
+    },
+    /// Module with excessive internal complexity relative to its public interface
+    FatModule {
+        private_functions: usize,
+        public_functions: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -199,6 +210,37 @@ impl Issue {
             ),
             suggestion: Some(
                 "This module depends on many different external crates, suggesting scattered concerns. Consider splitting by responsibility.".to_string(),
+            ),
+        }
+    }
+
+    /// Fat module: excessive internal complexity hidden behind a small interface
+    pub fn fat_module(
+        path: PathBuf,
+        lines: usize,
+        private_functions: usize,
+        public_functions: usize,
+        exports: usize,
+    ) -> Self {
+        Self {
+            kind: IssueKind::FatModule {
+                private_functions,
+                public_functions,
+            },
+            severity: IssueSeverity::Info,
+            locations: vec![Location {
+                path,
+                line: None,
+                context: None,
+            }],
+            message: format!(
+                "{} lines with {} private functions but only {} exports",
+                lines, private_functions, exports
+            ),
+            suggestion: Some(
+                "This module has significant internal complexity hidden behind a small interface. \
+                Consider extracting related functions into submodules."
+                    .to_string(),
             ),
         }
     }

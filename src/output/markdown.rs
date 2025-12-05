@@ -219,6 +219,30 @@ impl OutputFormatter for MarkdownOutput {
             writeln!(writer)?;
         }
 
+        // Fat Modules
+        let fat_modules: Vec<_> = filtered_issues
+            .iter()
+            .filter(|i| matches!(i.kind, IssueKind::FatModule { .. }))
+            .collect();
+
+        if !fat_modules.is_empty() {
+            writeln!(writer, "### 🔵 Fat Modules (Hidden Complexity)\n")?;
+            for issue in fat_modules {
+                if let Some(loc) = issue.locations.first() {
+                    writeln!(
+                        writer,
+                        "- `{}` - {}",
+                        self.relative_path(&loc.path),
+                        issue.message
+                    )?;
+                }
+                if let Some(ref suggestion) = issue.suggestion {
+                    writeln!(writer, "  → {}", suggestion)?;
+                }
+            }
+            writeln!(writer)?;
+        }
+
         Ok(())
     }
 }

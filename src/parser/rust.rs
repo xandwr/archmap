@@ -258,3 +258,76 @@ impl Default for RustParser {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parses_main_rs_functions() {
+        let parser = RustParser::new();
+        let source = std::fs::read_to_string("src/main.rs").unwrap();
+        let module = parser
+            .parse_module(Path::new("src/main.rs"), &source)
+            .unwrap();
+
+        println!("Definitions found: {}", module.definitions.len());
+        for def in &module.definitions {
+            println!(
+                "  {:?} {:?} {} at line {}",
+                def.visibility, def.kind, def.name, def.line
+            );
+        }
+
+        // main.rs should have functions like main, cmd_init, cmd_analyze, etc.
+        assert!(
+            !module.definitions.is_empty(),
+            "Should find function definitions in main.rs"
+        );
+
+        let fn_count = module
+            .definitions
+            .iter()
+            .filter(|d| d.kind == DefinitionKind::Function)
+            .count();
+        assert!(
+            fn_count > 5,
+            "main.rs should have more than 5 functions, found {}",
+            fn_count
+        );
+    }
+
+    #[test]
+    fn test_parses_private_functions() {
+        let parser = RustParser::new();
+        let source = r#"
+fn private_fn() {}
+pub fn public_fn() {}
+pub(crate) fn crate_fn() {}
+"#;
+        let module = parser.parse_module(Path::new("test.rs"), source).unwrap();
+
+        assert_eq!(module.definitions.len(), 3);
+
+        let private = module
+            .definitions
+            .iter()
+            .find(|d| d.name == "private_fn")
+            .unwrap();
+        assert_eq!(private.visibility, Visibility::Private);
+
+        let public = module
+            .definitions
+            .iter()
+            .find(|d| d.name == "public_fn")
+            .unwrap();
+        assert_eq!(public.visibility, Visibility::Public);
+
+        let crate_vis = module
+            .definitions
+            .iter()
+            .find(|d| d.name == "crate_fn")
+            .unwrap();
+        assert_eq!(crate_vis.visibility, Visibility::Crate);
+    }
+}

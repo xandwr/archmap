@@ -29,6 +29,12 @@ pub struct Thresholds {
     pub boundary_violation_min: usize,
     pub max_dependency_depth: usize,
     pub min_cohesion: f64,
+    /// Minimum lines for a module to be considered a "fat module"
+    pub fat_module_lines: usize,
+    /// Minimum private functions to trigger fat module detection
+    pub fat_module_private_functions: usize,
+    /// Maximum lines per export before flagging as fat
+    pub fat_module_lines_per_export: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,6 +52,9 @@ struct RawThresholds {
     boundary_violation_min: Option<usize>,
     max_dependency_depth: Option<usize>,
     min_cohesion: Option<f64>,
+    fat_module_lines: Option<usize>,
+    fat_module_private_functions: Option<usize>,
+    fat_module_lines_per_export: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +104,9 @@ impl Default for Thresholds {
             boundary_violation_min: 2,
             max_dependency_depth: 5,
             min_cohesion: 0.3,
+            fat_module_lines: 400,
+            fat_module_private_functions: 8,
+            fat_module_lines_per_export: 100.0,
         }
     }
 }
@@ -121,6 +133,9 @@ impl Config {
                 boundary_violation_min: t.boundary_violation_min.unwrap_or(2),
                 max_dependency_depth: t.max_dependency_depth.unwrap_or(5),
                 min_cohesion: t.min_cohesion.unwrap_or(0.3),
+                fat_module_lines: t.fat_module_lines.unwrap_or(400),
+                fat_module_private_functions: t.fat_module_private_functions.unwrap_or(8),
+                fat_module_lines_per_export: t.fat_module_lines_per_export.unwrap_or(100.0),
             },
             None => Thresholds::default(),
         };
@@ -240,6 +255,17 @@ max_dependency_depth = 5
 # Range: 0.0 to 1.0. Lower scores indicate module is doing too many unrelated things.
 # Default: 0.3
 min_cohesion = 0.3
+
+# Fat module detection - identifies files with excessive internal complexity
+# These are files with many private functions but few exports (hidden sprawl)
+# Unlike god objects which have many exports, fat modules hide their complexity
+# Test files are automatically excluded from this check
+# Default: 400 lines minimum
+fat_module_lines = 400
+# Default: 8 private functions minimum
+fat_module_private_functions = 8
+# Default: 100 lines per export maximum
+fat_module_lines_per_export = 100.0
 
 # Expected High Coupling
 # Glob patterns for modules where high fan-in is expected and shouldn't be flagged.

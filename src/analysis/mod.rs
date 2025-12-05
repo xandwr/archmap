@@ -1,6 +1,7 @@
 mod boundary;
 mod circular;
 mod cohesion;
+mod complexity;
 mod coupling;
 mod depth;
 mod god_object;
@@ -10,6 +11,7 @@ mod impact;
 pub use boundary::{detect_boundary_violations, detect_boundary_violations_with_fs};
 pub use circular::detect_circular_dependencies;
 pub use cohesion::detect_low_cohesion;
+pub use complexity::{ModuleComplexity, detect_fat_modules};
 pub use coupling::detect_high_coupling;
 pub use depth::detect_deep_dependency_chains;
 pub use god_object::detect_god_objects;
@@ -75,6 +77,9 @@ pub fn analyze_with_fs(
 
     // Low cohesion modules
     issues.extend(detect_low_cohesion(&modules, &dep_graph, config));
+
+    // Fat modules (excessive internal complexity)
+    issues.extend(detect_fat_modules(&modules, config));
 
     AnalysisResult {
         project_name,

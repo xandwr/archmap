@@ -229,6 +229,16 @@ impl AiOutput {
                         depth
                     ));
                 }
+                IssueKind::FatModule {
+                    private_functions,
+                    public_functions,
+                } => {
+                    recommendations.push(format!(
+                        "EXTRACT: {} private functions vs {} public. This module has hidden complexity. \
+                        Group related private functions into submodules.",
+                        private_functions, public_functions
+                    ));
+                }
             }
         }
 
