@@ -1,0 +1,11 @@
+# Available Tools
+
+## archmap
+Architectural analysis tool for detecting code smells and module coupling.
+
+Usage:
+- `archmap -h` - Help and all available commands
+- `archmap` - By default runs architectural analysis on the current directory
+- Shows module graph, high coupling issues, and boundary violations
+
+Run this before making significant architectural changes to understand the codebase structure.
