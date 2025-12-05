@@ -1,5 +1,6 @@
 use super::assets::INDEX_HTML;
 use super::data::GraphData;
+use crate::fs::{FileSystem, default_fs};
 use crate::style;
 use axum::{
     Json, Router,
@@ -203,6 +204,7 @@ async fn watch_files(
 }
 
 fn scan_files(path: &PathBuf, files: &mut HashMap<PathBuf, std::time::SystemTime>) {
+    let fs = default_fs();
     let walker = ignore::WalkBuilder::new(path)
         .hidden(true)
         .git_ignore(true)
@@ -211,10 +213,8 @@ fn scan_files(path: &PathBuf, files: &mut HashMap<PathBuf, std::time::SystemTime
     for entry in walker.flatten() {
         let file_path = entry.path();
         if file_path.is_file() {
-            if let Ok(metadata) = std::fs::metadata(file_path) {
-                if let Ok(modified) = metadata.modified() {
-                    files.insert(file_path.to_path_buf(), modified);
-                }
+            if let Ok(modified) = fs.modified(file_path) {
+                files.insert(file_path.to_path_buf(), modified);
             }
         }
     }

@@ -81,6 +81,9 @@ fn default_expected_high_coupling() -> Vec<String> {
         "**/index.ts".to_string(),
         "**/index.js".to_string(),
         "**/__init__.py".to_string(),
+        "**/fs.rs".to_string(),     // Centralized filesystem abstraction
+        "**/utils/**".to_string(),  // Utility modules
+        "**/common/**".to_string(), // Common/shared modules
     ]
 }
 

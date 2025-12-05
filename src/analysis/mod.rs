@@ -19,6 +19,7 @@ pub use impact::{
 };
 
 use crate::config::Config;
+use crate::fs::{FileSystem, default_fs};
 use crate::model::{AnalysisResult, Module};
 use crate::parser::ParserRegistry;
 use crate::style;
@@ -32,6 +33,16 @@ pub fn analyze(
     registry: &ParserRegistry,
     exclude: &[String],
 ) -> AnalysisResult {
+    analyze_with_fs(path, config, registry, exclude, default_fs())
+}
+
+pub fn analyze_with_fs(
+    path: &Path,
+    config: &Config,
+    registry: &ParserRegistry,
+    exclude: &[String],
+    fs: &dyn FileSystem,
+) -> AnalysisResult {
     let project_name = path
         .file_name()
         .and_then(|s| s.to_str())
@@ -39,7 +50,7 @@ pub fn analyze(
         .to_string();
 
     // Discover and parse all modules
-    let modules = discover_modules(path, registry, exclude);
+    let modules = discover_modules(path, registry, exclude, fs);
 
     // Build dependency graph
     let dep_graph = DependencyGraph::build(&modules);
@@ -57,7 +68,7 @@ pub fn analyze(
     issues.extend(detect_high_coupling(&dep_graph, config));
 
     // Boundary violations
-    issues.extend(detect_boundary_violations(&modules, config));
+    issues.extend(detect_boundary_violations_with_fs(&modules, config, fs));
 
     // Deep dependency chains
     issues.extend(detect_deep_dependency_chains(&dep_graph, config));
@@ -73,7 +84,12 @@ pub fn analyze(
     }
 }
 
-fn discover_modules(path: &Path, registry: &ParserRegistry, exclude: &[String]) -> Vec<Module> {
+fn discover_modules(
+    path: &Path,
+    registry: &ParserRegistry,
+    exclude: &[String],
+    fs: &dyn FileSystem,
+) -> Vec<Module> {
     let modules = Mutex::new(Vec::new());
     let exclude: Vec<String> = exclude.to_vec();
 
@@ -118,8 +134,8 @@ fn discover_modules(path: &Path, registry: &ParserRegistry, exclude: &[String]) 
                 None => return WalkState::Continue,
             };
 
-            // Read and parse
-            let source = match std::fs::read_to_string(file_path) {
+            // Read and parse using the FileSystem abstraction
+            let source = match fs.read_to_string(file_path) {
                 Ok(s) => s,
                 Err(_) => return WalkState::Continue,
             };

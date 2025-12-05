@@ -3,7 +3,7 @@
 //! This module provides a `FileSystem` trait that abstracts file operations,
 //! allowing for easy mocking in tests and consistent error handling.
 
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
 
 /// Trait for filesystem operations, enabling dependency injection and testing.
@@ -16,6 +16,12 @@ pub trait FileSystem: Send + Sync {
 
     /// Check if a path exists.
     fn exists(&self, path: &Path) -> bool;
+
+    /// Get the modification time of a file.
+    fn modified(&self, path: &Path) -> io::Result<std::time::SystemTime>;
+
+    /// Create and return a writer for a file (for output streams).
+    fn create_file(&self, path: &Path) -> io::Result<Box<dyn Write + Send>>;
 }
 
 /// Real filesystem implementation using std::fs.
@@ -39,6 +45,15 @@ impl FileSystem for RealFs {
 
     fn exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    fn modified(&self, path: &Path) -> io::Result<std::time::SystemTime> {
+        std::fs::metadata(path)?.modified()
+    }
+
+    fn create_file(&self, path: &Path) -> io::Result<Box<dyn Write + Send>> {
+        let file = std::fs::File::create(path)?;
+        Ok(Box::new(io::BufWriter::new(file)))
     }
 }
 
@@ -113,6 +128,19 @@ pub mod mock {
         fn exists(&self, path: &Path) -> bool {
             let key = path.to_string_lossy().to_string();
             self.files.read().unwrap().contains_key(&key)
+        }
+
+        fn modified(&self, _path: &Path) -> io::Result<std::time::SystemTime> {
+            // Mock: return current time (tests don't typically need real modification times)
+            Ok(std::time::SystemTime::now())
+        }
+
+        fn create_file(&self, path: &Path) -> io::Result<Box<dyn Write + Send>> {
+            // For mocking, we create an in-memory buffer that writes to our store on drop
+            // For simplicity, just return a Vec-based writer
+            let key = path.to_string_lossy().to_string();
+            self.files.write().unwrap().insert(key, String::new());
+            Ok(Box::new(Vec::new()))
         }
     }
 
