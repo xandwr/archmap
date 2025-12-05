@@ -1,6 +1,6 @@
 use crate::analysis::DependencyGraph;
 use crate::cli::{AiOutputFormat, PriorityStrategy};
-use crate::model::{AnalysisResult, DefinitionKind, Module, Visibility};
+use crate::model::{AnalysisResult, DefinitionKind, Issue, IssueKind, Module, Visibility};
 use crate::output::OutputFormatter;
 use std::collections::HashMap;
 use std::io::Write;
@@ -110,6 +110,129 @@ impl AiOutput {
             Ok(bpe) => bpe.encode_with_special_tokens(text).len(),
             Err(_) => text.len() / 4, // Fallback: ~4 chars per token
         }
+    }
+
+    /// Generate a safe refactoring order (leaf modules first, working up to core modules).
+    /// This allows an agent to refactor bottom-up without breaking dependents.
+    fn refactoring_order<'a>(
+        &self,
+        modules: &'a [Module],
+        graph: &DependencyGraph,
+    ) -> Vec<&'a Module> {
+        // Get reverse topological order (dependents before dependencies = leaves first)
+        let topo = graph.topological_order_with_cycles();
+
+        // Reverse it: we want leaves first (modules with no dependents)
+        let reversed: Vec<_> = topo.into_iter().rev().collect();
+
+        reversed
+            .iter()
+            .filter_map(|path| modules.iter().find(|m| &m.path == path))
+            .collect()
+    }
+
+    /// Generate file-level recommendations based on issues
+    fn file_recommendations(
+        &self,
+        module: &Module,
+        issues: &[Issue],
+        graph: &DependencyGraph,
+    ) -> Vec<String> {
+        let mut recommendations = Vec::new();
+        let path = &module.path;
+
+        for issue in issues {
+            let affects_this_module = issue.locations.iter().any(|loc| &loc.path == path);
+            if !affects_this_module {
+                continue;
+            }
+
+            match &issue.kind {
+                IssueKind::GodObject => {
+                    // Analyze what could be extracted
+                    let struct_count = module
+                        .definitions
+                        .iter()
+                        .filter(|d| d.kind == DefinitionKind::Struct)
+                        .count();
+                    let fn_count = module
+                        .definitions
+                        .iter()
+                        .filter(|d| d.kind == DefinitionKind::Function)
+                        .count();
+
+                    if struct_count > 3 {
+                        recommendations.push(format!(
+                            "EXTRACT: This file has {} structs. Consider extracting related structs into separate modules (e.g., `{}_types.rs`).",
+                            struct_count,
+                            module.name
+                        ));
+                    }
+                    if fn_count > 10 {
+                        recommendations.push(format!(
+                            "EXTRACT: This file has {} functions. Group related functions into separate modules by domain.",
+                            fn_count
+                        ));
+                    }
+                }
+                IssueKind::HighCoupling => {
+                    let fan_in = graph.fan_in(path);
+                    recommendations.push(format!(
+                        "INTERFACE: {} modules depend on this. Consider defining a trait/interface to reduce direct coupling.",
+                        fan_in
+                    ));
+                }
+                IssueKind::LowCohesion { score } => {
+                    // Identify what external dependencies are used
+                    let external: Vec<_> = module
+                        .imports
+                        .iter()
+                        .filter(|i| {
+                            !i.starts_with("crate::")
+                                && !i.starts_with("super::")
+                                && !i.starts_with("self::")
+                        })
+                        .take(3)
+                        .collect();
+
+                    if !external.is_empty() {
+                        recommendations.push(format!(
+                            "FOCUS: Cohesion score {:.2}. This module mixes concerns. Primary external deps: {}. Consider splitting by responsibility.",
+                            score,
+                            external.iter().map(|s| s.split("::").next().unwrap_or(s)).collect::<Vec<_>>().join(", ")
+                        ));
+                    }
+                }
+                IssueKind::BoundaryViolation { boundary_name } => {
+                    let violation_count = issue
+                        .locations
+                        .iter()
+                        .filter(|loc| &loc.path == path)
+                        .count();
+
+                    if violation_count > 0 {
+                        recommendations.push(format!(
+                            "CENTRALIZE: {} {} boundary crossings. Extract to a dedicated service/repository module.",
+                            violation_count,
+                            boundary_name
+                        ));
+                    }
+                }
+                IssueKind::CircularDependency => {
+                    recommendations.push(
+                        "DECOUPLE: Part of a circular dependency. Extract shared types to a separate module, or use dependency injection.".to_string()
+                    );
+                }
+                IssueKind::DeepDependencyChain { depth } => {
+                    recommendations.push(format!(
+                        "FLATTEN: Part of a {}-deep dependency chain. Consider introducing a facade or flattening the hierarchy.",
+                        depth
+                    ));
+                }
+            }
+        }
+
+        recommendations
     }
 
     fn format_module_signature(&self, module: &Module) -> String {
@@ -238,8 +361,8 @@ impl AiOutput {
     ) -> std::io::Result<()> {
         let prioritized = self.prioritize_modules(&result.modules, graph);
 
-        // Reserve tokens for structure
-        let structure_reserve = 500;
+        // Reserve tokens for structure and metadata sections
+        let structure_reserve = 800;
         let available = budget.saturating_sub(structure_reserve);
 
         let mut used_tokens = 0;
@@ -291,6 +414,53 @@ impl AiOutput {
             budget
         )?;
 
+        // Add refactoring order section
+        let refactor_order = self.refactoring_order(&result.modules, graph);
+        writeln!(writer, "## Suggested Refactoring Order\n")?;
+        writeln!(
+            writer,
+            "Modules listed leaf-first (safest to modify first, fewest dependents):\n"
+        )?;
+        for (i, module) in refactor_order.iter().take(15).enumerate() {
+            let fan_in = graph.fan_in(&module.path);
+            let rel_path = self.relative_path(&module.path);
+            writeln!(writer, "{}. `{}` ({} dependents)", i + 1, rel_path, fan_in)?;
+        }
+        if refactor_order.len() > 15 {
+            writeln!(
+                writer,
+                "... and {} more modules\n",
+                refactor_order.len() - 15
+            )?;
+        }
+        writeln!(writer)?;
+
+        // Add actionable recommendations section
+        let modules_with_issues: Vec<_> = result
+            .modules
+            .iter()
+            .filter_map(|m| {
+                let recs = self.file_recommendations(m, &result.issues, graph);
+                if recs.is_empty() {
+                    None
+                } else {
+                    Some((m, recs))
+                }
+            })
+            .collect();
+
+        if !modules_with_issues.is_empty() {
+            writeln!(writer, "## Actionable Recommendations\n")?;
+            for (module, recs) in modules_with_issues.iter().take(10) {
+                let rel_path = self.relative_path(&module.path);
+                writeln!(writer, "### `{}`\n", rel_path)?;
+                for rec in recs {
+                    writeln!(writer, "- {}", rec)?;
+                }
+                writeln!(writer)?;
+            }
+        }
+
         writeln!(writer, "## Included Modules ({})\n", included.len())?;
 
         for (module, score, content, _tokens) in &included {
@@ -328,6 +498,35 @@ impl AiOutput {
         let graph = DependencyGraph::build(&result.modules);
         let ordered = self.order_modules(&result.modules, &graph);
 
+        // Build refactoring order
+        let refactor_order: Vec<_> = self
+            .refactoring_order(&result.modules, &graph)
+            .iter()
+            .map(|m| {
+                json!({
+                    "path": self.relative_path(&m.path),
+                    "dependents": graph.fan_in(&m.path)
+                })
+            })
+            .collect();
+
+        // Build recommendations
+        let recommendations: Vec<_> = result
+            .modules
+            .iter()
+            .filter_map(|m| {
+                let recs = self.file_recommendations(m, &result.issues, &graph);
+                if recs.is_empty() {
+                    None
+                } else {
+                    Some(json!({
+                        "path": self.relative_path(&m.path),
+                        "actions": recs
+                    }))
+                }
+            })
+            .collect();
+
         let modules_json: Vec<_> = ordered
             .iter()
             .map(|m| {
@@ -361,6 +560,8 @@ impl AiOutput {
         let output = json!({
             "project": result.project_name,
             "ordering": if self.topo_order { "topological" } else { "filesystem" },
+            "refactoring_order": refactor_order,
+            "recommendations": recommendations,
             "modules": modules_json
         });
 
@@ -373,22 +574,103 @@ impl AiOutput {
         let graph = DependencyGraph::build(&result.modules);
         let ordered = self.order_modules(&result.modules, &graph);
 
-        writeln!(writer, "<project name=\"{}\">", result.project_name)?;
+        writeln!(
+            writer,
+            "<architectural_context project=\"{}\">",
+            escape_xml(&result.project_name)
+        )?;
 
-        for module in ordered {
+        // Refactoring order section - critical for agents
+        writeln!(
+            writer,
+            "  <refactoring_order description=\"Modules listed leaf-first, safest to modify first\">"
+        )?;
+        for (i, module) in self
+            .refactoring_order(&result.modules, &graph)
+            .iter()
+            .enumerate()
+        {
             let rel_path = self.relative_path(&module.path);
+            let fan_in = graph.fan_in(&module.path);
             writeln!(
                 writer,
-                "  <module path=\"{}\" name=\"{}\" lines=\"{}\">",
-                rel_path, module.name, module.lines
+                "    <step order=\"{}\" path=\"{}\" dependents=\"{}\"/>",
+                i + 1,
+                escape_xml(&rel_path),
+                fan_in
+            )?;
+        }
+        writeln!(writer, "  </refactoring_order>")?;
+
+        // Actionable recommendations section
+        let modules_with_issues: Vec<_> = result
+            .modules
+            .iter()
+            .filter_map(|m| {
+                let recs = self.file_recommendations(m, &result.issues, &graph);
+                if recs.is_empty() {
+                    None
+                } else {
+                    Some((m, recs))
+                }
+            })
+            .collect();
+
+        if !modules_with_issues.is_empty() {
+            writeln!(writer, "  <recommendations>")?;
+            for (module, recs) in &modules_with_issues {
+                let rel_path = self.relative_path(&module.path);
+                writeln!(writer, "    <file path=\"{}\">", escape_xml(&rel_path))?;
+                for rec in recs {
+                    // Parse the action type from the recommendation
+                    let (action_type, description) = if let Some(idx) = rec.find(':') {
+                        (&rec[..idx], rec[idx + 1..].trim())
+                    } else {
+                        ("REFACTOR", rec.as_str())
+                    };
+                    writeln!(
+                        writer,
+                        "      <action type=\"{}\">{}</action>",
+                        action_type,
+                        escape_xml(description)
+                    )?;
+                }
+                writeln!(writer, "    </file>")?;
+            }
+            writeln!(writer, "  </recommendations>")?;
+        }
+
+        // Modules section
+        writeln!(writer, "  <modules count=\"{}\">", ordered.len())?;
+        for module in ordered {
+            let rel_path = self.relative_path(&module.path);
+            let fan_in = graph.fan_in(&module.path);
+            let fan_out = graph.fan_out(&module.path);
+
+            writeln!(
+                writer,
+                "    <module path=\"{}\" name=\"{}\" lines=\"{}\" fan_in=\"{}\" fan_out=\"{}\">",
+                escape_xml(&rel_path),
+                escape_xml(&module.name),
+                module.lines,
+                fan_in,
+                fan_out
             )?;
 
             if !module.imports.is_empty() {
-                writeln!(writer, "    <imports>")?;
+                writeln!(writer, "      <imports>")?;
                 for import in &module.imports {
-                    writeln!(writer, "      <import>{}</import>", import)?;
+                    writeln!(writer, "        <import>{}</import>", escape_xml(import))?;
                 }
-                writeln!(writer, "    </imports>")?;
+                writeln!(writer, "      </imports>")?;
+            }
+
+            if !module.exports.is_empty() {
+                writeln!(writer, "      <exports>")?;
+                for export in &module.exports {
+                    writeln!(writer, "        <export>{}</export>", escape_xml(export))?;
+                }
+                writeln!(writer, "      </exports>")?;
             }
 
             // Public definitions
@@ -399,30 +681,36 @@ impl AiOutput {
                 .collect();
 
             if !public_defs.is_empty() {
-                writeln!(writer, "    <definitions>")?;
+                writeln!(writer, "      <definitions>")?;
                 for def in public_defs {
                     let kind = format!("{:?}", def.kind).to_lowercase();
                     writeln!(
                         writer,
-                        "      <{} name=\"{}\" line=\"{}\">",
-                        kind, def.name, def.line
+                        "        <{} name=\"{}\" line=\"{}\">",
+                        kind,
+                        escape_xml(&def.name),
+                        def.line
                     )?;
                     if let Some(ref sig) = def.signature {
-                        // Escape XML special characters
-                        let escaped = sig
-                            .replace('&', "&amp;")
-                            .replace('<', "&lt;")
-                            .replace('>', "&gt;");
-                        writeln!(writer, "        <![CDATA[{}]]>", escaped)?;
+                        writeln!(writer, "<![CDATA[{}]]>", sig)?;
                     }
-                    writeln!(writer, "      </{}>", kind)?;
+                    writeln!(writer, "        </{}>", kind)?;
                 }
-                writeln!(writer, "    </definitions>")?;
+                writeln!(writer, "      </definitions>")?;
             }
 
-            writeln!(writer, "  </module>")?;
+            writeln!(writer, "    </module>")?;
         }
+        writeln!(writer, "  </modules>")?;
 
-        writeln!(writer, "</project>")
+        writeln!(writer, "</architectural_context>")
     }
+}
+
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
