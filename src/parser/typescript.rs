@@ -1,0 +1,194 @@
+use crate::model::{Definition, DefinitionKind, Module};
+use crate::parser::{LanguageParser, ParseError};
+use std::path::Path;
+use tree_sitter::Parser;
+
+pub struct TypeScriptParser;
+
+impl TypeScriptParser {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl LanguageParser for TypeScriptParser {
+    fn extensions(&self) -> &[&str] {
+        &["ts", "tsx", "js", "jsx"]
+    }
+
+    fn parse_module(&self, path: &Path, source: &str) -> Result<Module, ParseError> {
+        let mut module = Module::new(path.to_path_buf());
+        module.lines = source.lines().count();
+
+        let mut parser = Parser::new();
+
+        // Use TypeScript parser for .ts/.tsx, JavaScript-compatible for .js/.jsx
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let language = if ext == "tsx" {
+            tree_sitter_typescript::LANGUAGE_TSX
+        } else {
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT
+        };
+
+        parser
+            .set_language(&language.into())
+            .expect("Failed to set TypeScript language");
+
+        let tree = parser
+            .parse(source, None)
+            .ok_or_else(|| ParseError::Parse("Failed to parse file".to_string()))?;
+
+        let root = tree.root_node();
+        let source_bytes = source.as_bytes();
+
+        // Walk the tree to extract imports and definitions
+        let mut cursor = root.walk();
+
+        for node in root.children(&mut cursor) {
+            match node.kind() {
+                "import_statement" => {
+                    if let Ok(text) = node.utf8_text(source_bytes) {
+                        // Extract the import path
+                        let import = extract_import_path(text);
+                        if !import.is_empty() {
+                            module.imports.push(import);
+                        }
+                    }
+                }
+                "export_statement" => {
+                    // Handle export declarations
+                    let mut child_cursor = node.walk();
+                    for child in node.children(&mut child_cursor) {
+                        extract_definition(&child, source_bytes, &mut module);
+                    }
+                }
+                "function_declaration" => {
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        if let Ok(name) = name_node.utf8_text(source_bytes) {
+                            module.definitions.push(Definition {
+                                name: name.to_string(),
+                                kind: DefinitionKind::Function,
+                                line: node.start_position().row + 1,
+                            });
+                        }
+                    }
+                }
+                "class_declaration" => {
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        if let Ok(name) = name_node.utf8_text(source_bytes) {
+                            module.definitions.push(Definition {
+                                name: name.to_string(),
+                                kind: DefinitionKind::Class,
+                                line: node.start_position().row + 1,
+                            });
+                            module.exports.push(name.to_string());
+                        }
+                    }
+                }
+                "interface_declaration" => {
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        if let Ok(name) = name_node.utf8_text(source_bytes) {
+                            module.definitions.push(Definition {
+                                name: name.to_string(),
+                                kind: DefinitionKind::Interface,
+                                line: node.start_position().row + 1,
+                            });
+                            module.exports.push(name.to_string());
+                        }
+                    }
+                }
+                "type_alias_declaration" => {
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        if let Ok(name) = name_node.utf8_text(source_bytes) {
+                            module.definitions.push(Definition {
+                                name: name.to_string(),
+                                kind: DefinitionKind::Type,
+                                line: node.start_position().row + 1,
+                            });
+                            module.exports.push(name.to_string());
+                        }
+                    }
+                }
+                "lexical_declaration" | "variable_declaration" => {
+                    // Handle const/let/var declarations
+                    let mut child_cursor = node.walk();
+                    for child in node.children(&mut child_cursor) {
+                        if child.kind() == "variable_declarator" {
+                            if let Some(name_node) = child.child_by_field_name("name") {
+                                if let Ok(name) = name_node.utf8_text(source_bytes) {
+                                    module.definitions.push(Definition {
+                                        name: name.to_string(),
+                                        kind: DefinitionKind::Function, // Could be a const function
+                                        line: node.start_position().row + 1,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(module)
+    }
+}
+
+fn extract_import_path(import_text: &str) -> String {
+    // Extract path from: import ... from "path" or import "path"
+    if let Some(start) = import_text.find('"').or_else(|| import_text.find('\'')) {
+        let rest = &import_text[start + 1..];
+        if let Some(end) = rest.find('"').or_else(|| rest.find('\'')) {
+            return rest[..end].to_string();
+        }
+    }
+    String::new()
+}
+
+fn extract_definition(node: &tree_sitter::Node, source_bytes: &[u8], module: &mut Module) {
+    match node.kind() {
+        "function_declaration" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Ok(name) = name_node.utf8_text(source_bytes) {
+                    module.definitions.push(Definition {
+                        name: name.to_string(),
+                        kind: DefinitionKind::Function,
+                        line: node.start_position().row + 1,
+                    });
+                    module.exports.push(name.to_string());
+                }
+            }
+        }
+        "class_declaration" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Ok(name) = name_node.utf8_text(source_bytes) {
+                    module.definitions.push(Definition {
+                        name: name.to_string(),
+                        kind: DefinitionKind::Class,
+                        line: node.start_position().row + 1,
+                    });
+                    module.exports.push(name.to_string());
+                }
+            }
+        }
+        "interface_declaration" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Ok(name) = name_node.utf8_text(source_bytes) {
+                    module.definitions.push(Definition {
+                        name: name.to_string(),
+                        kind: DefinitionKind::Interface,
+                        line: node.start_position().row + 1,
+                    });
+                    module.exports.push(name.to_string());
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+impl Default for TypeScriptParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
