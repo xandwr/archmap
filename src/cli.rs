@@ -203,7 +203,7 @@ pub struct GraphArgs {
     pub serve: bool,
 
     /// Port for HTTP server
-    #[arg(long, default_value = "8080")]
+    #[arg(long, default_value = "3000")]
     pub port: u16,
 
     /// Path to analyze (defaults to current directory)

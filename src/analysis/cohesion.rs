@@ -25,6 +25,11 @@ pub fn detect_low_cohesion(
 
     // For each module, calculate cohesion
     for module in modules {
+        // Skip re-export hub modules - they're designed to have low internal cohesion
+        if is_reexport_hub(module) {
+            continue;
+        }
+
         let package = get_package_name(&module.path);
         let siblings: HashSet<String> = packages
             .get(&package)
@@ -108,6 +113,22 @@ fn is_relative_import(import: &str) -> bool {
         || import.starts_with("crate::")
         || import.starts_with("./")
         || import.starts_with("../")
+}
+
+/// Check if module is a re-export hub (lib.rs, mod.rs, main.rs, index.ts, __init__.py).
+/// These modules are designed to aggregate and re-export from other modules,
+/// so low cohesion is expected and not a code smell.
+fn is_reexport_hub(module: &Module) -> bool {
+    let file_name = module
+        .path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+
+    matches!(
+        file_name,
+        "lib.rs" | "mod.rs" | "main.rs" | "index.ts" | "index.js" | "__init__.py"
+    )
 }
 
 fn extract_cohesion_score(message: &str) -> f64 {
