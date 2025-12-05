@@ -4,6 +4,7 @@ mod diff;
 mod graph;
 mod impact;
 mod init;
+mod mcp;
 mod snapshot;
 
 pub use ai::cmd_ai;
@@ -12,6 +13,7 @@ pub use diff::cmd_diff;
 pub use graph::cmd_graph;
 pub use impact::cmd_impact;
 pub use init::cmd_init;
+pub use mcp::cmd_mcp;
 pub use snapshot::cmd_snapshot;
 
 use crate::config::Config;

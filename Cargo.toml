@@ -18,7 +18,8 @@ thiserror = "2"
 rayon = "1.10"
 tiktoken-rs = "0.9.1"
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-std"] }
+rmcp = { version = "0.10", features = ["server", "transport-io"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower-http = { version = "0.6", features = ["cors"] }
 open = "5"

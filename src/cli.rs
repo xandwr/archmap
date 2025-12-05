@@ -42,6 +42,9 @@ pub enum Command {
 
     /// Generate a starter .archmap.toml configuration file
     Init(InitArgs),
+
+    /// Start MCP server for AI assistant integration (stdio transport)
+    Mcp(McpArgs),
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -239,6 +242,13 @@ pub struct GraphArgs {
 #[derive(Parser, Debug, Clone)]
 pub struct InitArgs {
     /// Path where to create .archmap.toml (defaults to current directory)
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct McpArgs {
+    /// Working directory for analysis (defaults to current directory)
     #[arg(default_value = ".")]
     pub path: PathBuf,
 }

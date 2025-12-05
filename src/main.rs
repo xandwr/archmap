@@ -1,5 +1,7 @@
 use archmap::cli::{AnalyzeArgs, Cli, Command};
-use archmap::{cmd_ai, cmd_analyze, cmd_diff, cmd_graph, cmd_impact, cmd_init, cmd_snapshot};
+use archmap::{
+    cmd_ai, cmd_analyze, cmd_diff, cmd_graph, cmd_impact, cmd_init, cmd_mcp, cmd_snapshot,
+};
 use clap::Parser;
 
 fn main() {
@@ -19,6 +21,7 @@ fn main() {
         Some(Command::Diff(args)) => cmd_diff(args),
         Some(Command::Graph(args)) => cmd_graph(args),
         Some(Command::Init(args)) => cmd_init(args),
+        Some(Command::Mcp(args)) => cmd_mcp(args),
         None => {
             // Backward compatibility: treat path as analyze command
             let args = AnalyzeArgs {
@@ -150,7 +153,7 @@ fn print_mcp_manifest() {
             "archmap": {
                 "type": "stdio",
                 "command": exe_path,
-                "args": [],
+                "args": ["mcp"],
                 "description": "Architectural analysis and code understanding for AI agents"
             }
         }
