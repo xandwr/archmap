@@ -14,6 +14,10 @@ pub struct Cli {
     /// Used when no subcommand is specified for backward compatibility
     #[arg(default_value = ".")]
     pub path: PathBuf,
+
+    /// Output MCP server manifest JSON for MCP client configuration
+    #[arg(long)]
+    pub mcp_manifest: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
