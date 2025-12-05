@@ -28,6 +28,7 @@ archmap analyze                     # Markdown output
 archmap analyze -f json             # JSON output
 archmap analyze --watch             # Re-analyze on file changes
 archmap analyze --min-severity warn # Filter by severity
+archmap analyze -x tests -x vendor  # Exclude directories
 ```
 
 Example output:
@@ -145,6 +146,21 @@ suggestion = "Consider centralizing in an API client service"
 
 ```bash
 archmap analyze --lang rust,typescript  # Specific languages
+```
+
+## Performance
+
+archmap uses parallel file walking and thread-local tree-sitter parsers for fast analysis:
+
+| Codebase | Files | Time |
+|----------|-------|------|
+| archmap itself | 32 | 10ms |
+| TypeScript compiler (src/) | 702 | 0.4s |
+
+For large codebases with extensive test suites, use `-x` to exclude test directories:
+
+```bash
+archmap analyze -x tests -x node_modules -x vendor
 ```
 
 ## Use Cases

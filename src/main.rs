@@ -97,7 +97,7 @@ fn run_analysis(
     effective_config.thresholds.max_dependency_depth = args.max_depth;
     effective_config.thresholds.min_cohesion = args.min_cohesion;
 
-    let result = archmap::analysis::analyze(path, &effective_config, registry);
+    let result = archmap::analysis::analyze(path, &effective_config, registry, &args.exclude);
 
     // Set up output
     let mut output: Box<dyn Write> = match &args.output {
@@ -252,7 +252,7 @@ fn cmd_ai(args: AiArgs) -> i32 {
     let sources = collect_sources(&path, &registry);
 
     // Run analysis
-    let result = archmap::analysis::analyze(&path, &config, &registry);
+    let result = archmap::analysis::analyze(&path, &config, &registry, &[]);
 
     // Set up output
     let mut output: Box<dyn Write> = match &args.output {
@@ -349,7 +349,7 @@ fn cmd_impact(args: ImpactArgs) -> i32 {
     };
 
     // Run analysis to build dependency graph
-    let result = archmap::analysis::analyze(&project_path, &config, &registry);
+    let result = archmap::analysis::analyze(&project_path, &config, &registry, &[]);
 
     // Build dependency graph
     let graph = archmap::analysis::DependencyGraph::build(&result.modules);
@@ -420,7 +420,7 @@ fn cmd_snapshot(args: SnapshotArgs) -> i32 {
     };
 
     // Run analysis
-    let result = archmap::analysis::analyze(&path, &config, &registry);
+    let result = archmap::analysis::analyze(&path, &config, &registry, &[]);
 
     // Create snapshot
     let snapshot = archmap::snapshot::Snapshot::from_analysis(&result, &path);
@@ -477,7 +477,7 @@ fn cmd_diff(args: DiffArgs) -> i32 {
     };
 
     // Run current analysis
-    let result = archmap::analysis::analyze(&path, &config, &registry);
+    let result = archmap::analysis::analyze(&path, &config, &registry, &[]);
 
     // Create current snapshot
     let current = archmap::snapshot::Snapshot::from_analysis(&result, &path);
@@ -537,7 +537,7 @@ fn cmd_graph(args: GraphArgs) -> i32 {
     };
 
     // Run analysis
-    let result = archmap::analysis::analyze(&path, &config, &registry);
+    let result = archmap::analysis::analyze(&path, &config, &registry, &[]);
 
     // Build graph data
     let graph_data = archmap::graph::GraphData::from_analysis(&result, &path);

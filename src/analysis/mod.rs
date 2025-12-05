@@ -21,10 +21,16 @@ pub use impact::{
 use crate::config::Config;
 use crate::model::{AnalysisResult, Module};
 use crate::parser::ParserRegistry;
-use ignore::WalkBuilder;
+use ignore::{WalkBuilder, WalkState};
 use std::path::Path;
+use std::sync::Mutex;
 
-pub fn analyze(path: &Path, config: &Config, registry: &ParserRegistry) -> AnalysisResult {
+pub fn analyze(
+    path: &Path,
+    config: &Config,
+    registry: &ParserRegistry,
+    exclude: &[String],
+) -> AnalysisResult {
     let project_name = path
         .file_name()
         .and_then(|s| s.to_str())
@@ -32,7 +38,7 @@ pub fn analyze(path: &Path, config: &Config, registry: &ParserRegistry) -> Analy
         .to_string();
 
     // Discover and parse all modules
-    let modules = discover_modules(path, registry);
+    let modules = discover_modules(path, registry, exclude);
 
     // Build dependency graph
     let dep_graph = DependencyGraph::build(&modules);
@@ -66,29 +72,75 @@ pub fn analyze(path: &Path, config: &Config, registry: &ParserRegistry) -> Analy
     }
 }
 
-fn discover_modules(path: &Path, registry: &ParserRegistry) -> Vec<Module> {
-    let mut modules = Vec::new();
+fn discover_modules(path: &Path, registry: &ParserRegistry, exclude: &[String]) -> Vec<Module> {
+    let modules = Mutex::new(Vec::new());
+    let exclude: Vec<String> = exclude.to_vec();
 
-    let walker = WalkBuilder::new(path).hidden(true).git_ignore(true).build();
-
-    for entry in walker.flatten() {
-        let file_path = entry.path();
-
-        if !file_path.is_file() {
-            continue;
-        }
-
-        if let Some(parser) = registry.find_parser(file_path) {
-            if let Ok(source) = std::fs::read_to_string(file_path) {
-                match parser.parse_module(file_path, &source) {
-                    Ok(module) => modules.push(module),
-                    Err(e) => {
-                        eprintln!("Warning: Failed to parse {}: {}", file_path.display(), e);
-                    }
+    // Use parallel walker from ignore crate - much faster than sequential + rayon
+    let mut builder = WalkBuilder::new(path);
+    builder
+        .hidden(true)
+        .git_ignore(true)
+        .threads(num_cpus())
+        .filter_entry(move |entry| {
+            // Check if this entry matches any exclusion pattern
+            let path = entry.path();
+            for pattern in &exclude {
+                if path.ends_with(pattern)
+                    || path.to_string_lossy().contains(&format!("/{}/", pattern))
+                {
+                    return false;
                 }
             }
-        }
-    }
+            true
+        });
 
-    modules
+    let walker = builder.build_parallel();
+
+    walker.run(|| {
+        Box::new(|entry| {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => return WalkState::Continue,
+            };
+
+            let file_path = entry.path();
+
+            // Skip non-files
+            if !file_path.is_file() {
+                return WalkState::Continue;
+            }
+
+            // Find parser for this file type
+            let parser = match registry.find_parser(file_path) {
+                Some(p) => p,
+                None => return WalkState::Continue,
+            };
+
+            // Read and parse
+            let source = match std::fs::read_to_string(file_path) {
+                Ok(s) => s,
+                Err(_) => return WalkState::Continue,
+            };
+
+            match parser.parse_module(file_path, &source) {
+                Ok(module) => {
+                    modules.lock().unwrap().push(module);
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to parse {}: {}", file_path.display(), e);
+                }
+            }
+
+            WalkState::Continue
+        })
+    });
+
+    modules.into_inner().unwrap()
+}
+
+fn num_cpus() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
 }

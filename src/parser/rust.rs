@@ -1,7 +1,16 @@
 use crate::model::{Definition, DefinitionKind, Module, Visibility};
 use crate::parser::{LanguageParser, ParseError};
+use std::cell::RefCell;
 use std::path::Path;
 use tree_sitter::{Node, Parser};
+
+thread_local! {
+    static RUST_PARSER: RefCell<Parser> = RefCell::new({
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).expect("Failed to set Rust language");
+        parser
+    });
+}
 
 pub struct RustParser;
 
@@ -61,13 +70,8 @@ impl LanguageParser for RustParser {
         let mut module = Module::new(path.to_path_buf());
         module.lines = source.lines().count();
 
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_rust::LANGUAGE.into())
-            .expect("Failed to set Rust language");
-
-        let tree = parser
-            .parse(source, None)
+        let tree = RUST_PARSER
+            .with(|parser| parser.borrow_mut().parse(source, None))
             .ok_or_else(|| ParseError::Parse("Failed to parse file".to_string()))?;
 
         let root = tree.root_node();

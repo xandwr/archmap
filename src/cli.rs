@@ -73,6 +73,10 @@ pub struct AnalyzeArgs {
     /// Minimum cohesion score before flagging (0.0-1.0, default: 0.3)
     #[arg(long, default_value = "0.3")]
     pub min_cohesion: f64,
+
+    /// Directories to exclude (can be specified multiple times)
+    #[arg(long = "exclude", short = 'x', value_name = "DIR")]
+    pub exclude: Vec<String>,
 }
 
 impl Default for AnalyzeArgs {
@@ -86,6 +90,7 @@ impl Default for AnalyzeArgs {
             watch: false,
             max_depth: 5,
             min_cohesion: 0.3,
+            exclude: Vec::new(),
         }
     }
 }

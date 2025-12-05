@@ -175,7 +175,7 @@ async fn watch_files(
             println!("  Re-analyzing...");
 
             // Re-run analysis
-            let result = crate::analysis::analyze(&ctx.path, &ctx.config, &ctx.registry);
+            let result = crate::analysis::analyze(&ctx.path, &ctx.config, &ctx.registry, &[]);
             let new_graph = GraphData::from_analysis(&result, &ctx.path);
 
             // Update the shared graph data

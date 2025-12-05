@@ -1,7 +1,21 @@
 use crate::model::{Definition, DefinitionKind, Module, Visibility};
 use crate::parser::{LanguageParser, ParseError};
+use std::cell::RefCell;
 use std::path::Path;
 use tree_sitter::{Node, Parser};
+
+thread_local! {
+    static TS_PARSER: RefCell<Parser> = RefCell::new({
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()).expect("Failed to set TS language");
+        parser
+    });
+    static TSX_PARSER: RefCell<Parser> = RefCell::new({
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_typescript::LANGUAGE_TSX.into()).expect("Failed to set TSX language");
+        parser
+    });
+}
 
 pub struct TypeScriptParser;
 
@@ -40,23 +54,14 @@ impl LanguageParser for TypeScriptParser {
         let mut module = Module::new(path.to_path_buf());
         module.lines = source.lines().count();
 
-        let mut parser = Parser::new();
-
-        // Use TypeScript parser for .ts/.tsx, JavaScript-compatible for .js/.jsx
+        // Use TSX parser for .tsx files, TS parser for everything else
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let language = if ext == "tsx" {
-            tree_sitter_typescript::LANGUAGE_TSX
+        let tree = if ext == "tsx" {
+            TSX_PARSER.with(|parser| parser.borrow_mut().parse(source, None))
         } else {
-            tree_sitter_typescript::LANGUAGE_TYPESCRIPT
-        };
-
-        parser
-            .set_language(&language.into())
-            .expect("Failed to set TypeScript language");
-
-        let tree = parser
-            .parse(source, None)
-            .ok_or_else(|| ParseError::Parse("Failed to parse file".to_string()))?;
+            TS_PARSER.with(|parser| parser.borrow_mut().parse(source, None))
+        }
+        .ok_or_else(|| ParseError::Parse("Failed to parse file".to_string()))?;
 
         let root = tree.root_node();
         let source_bytes = source.as_bytes();
