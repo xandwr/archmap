@@ -169,6 +169,39 @@ impl Issue {
             ),
         }
     }
+
+    /// Improved cohesion metric that considers dependency diversity
+    pub fn low_cohesion_v2(
+        path: PathBuf,
+        score: f64,
+        internal_imports: usize,
+        total_external: usize,
+        unique_crates: usize,
+        top_crates: Vec<String>,
+    ) -> Self {
+        let crates_str = if top_crates.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", top_crates.join(", "))
+        };
+
+        Self {
+            kind: IssueKind::LowCohesion { score },
+            severity: IssueSeverity::Info,
+            locations: vec![Location {
+                path,
+                line: None,
+                context: None,
+            }],
+            message: format!(
+                "Cohesion score: {:.2} ({} internal imports, {} external from {} different crates{})",
+                score, internal_imports, total_external, unique_crates, crates_str
+            ),
+            suggestion: Some(
+                "This module depends on many different external crates, suggesting scattered concerns. Consider splitting by responsibility.".to_string(),
+            ),
+        }
+    }
 }
 
 impl std::fmt::Display for IssueSeverity {

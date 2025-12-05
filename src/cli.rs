@@ -214,6 +214,10 @@ pub struct GraphArgs {
     #[arg(long)]
     pub open: bool,
 
+    /// Watch for file changes and live-update the visualization
+    #[arg(short, long)]
+    pub watch: bool,
+
     /// Export graph as static HTML file instead of serving
     #[arg(long)]
     pub export: Option<PathBuf>,

@@ -533,7 +533,118 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
             simulation.alpha(0.3).restart();
         });
 
+        // Server-Sent Events for live updates (watch mode)
+        function setupSSE() {
+            const evtSource = new EventSource('/api/events');
+
+            evtSource.addEventListener('update', async (event) => {
+                console.log('Graph update received, version:', event.data);
+
+                // Fetch new graph data
+                const response = await fetch('/api/graph');
+                const newData = await response.json();
+
+                // Update stats
+                document.getElementById('stat-modules').textContent = newData.metadata.total_modules;
+                document.getElementById('stat-deps').textContent = newData.metadata.total_dependencies;
+                document.getElementById('stat-issues').textContent = newData.metadata.total_issues;
+                document.getElementById('stat-cycles').textContent = newData.metadata.cycle_count;
+
+                // Preserve node positions where possible
+                const oldPositions = {};
+                if (graphData && graphData.nodes) {
+                    graphData.nodes.forEach(n => {
+                        oldPositions[n.id] = { x: n.x, y: n.y, vx: n.vx, vy: n.vy };
+                    });
+                }
+
+                // Apply old positions to new nodes
+                newData.nodes.forEach(n => {
+                    if (oldPositions[n.id]) {
+                        n.x = oldPositions[n.id].x;
+                        n.y = oldPositions[n.id].y;
+                        n.vx = oldPositions[n.id].vx;
+                        n.vy = oldPositions[n.id].vy;
+                    }
+                });
+
+                graphData = newData;
+
+                // Update links
+                link = link.data(graphData.links, d => `${d.source.id || d.source}-${d.target.id || d.target}`);
+                link.exit().remove();
+                link = link.enter()
+                    .append('line')
+                    .attr('class', d => d.is_cycle ? 'link cycle' : 'link')
+                    .attr('marker-end', 'url(#arrowhead)')
+                    .merge(link);
+
+                // Update nodes
+                node = node.data(graphData.nodes, d => d.id);
+                node.exit().remove();
+                const nodeEnter = node.enter()
+                    .append('g')
+                    .attr('class', 'node')
+                    .call(d3.drag()
+                        .on('start', dragstarted)
+                        .on('drag', dragged)
+                        .on('end', dragended));
+
+                nodeEnter.append('circle')
+                    .attr('r', d => getNodeRadius(d))
+                    .attr('fill', d => categoryColors[d.category] || '#74b9ff');
+
+                nodeEnter.append('text')
+                    .attr('dy', -12)
+                    .attr('text-anchor', 'middle')
+                    .text(d => d.name);
+
+                const tooltip = d3.select('.tooltip');
+                nodeEnter.on('mouseover', function(event, d) {
+                    tooltip.style('display', 'block')
+                        .html(`<strong>${d.name}</strong><br>${d.path}<br>Lines: ${d.lines}<br>Fan-in: ${d.fan_in} | Fan-out: ${d.fan_out}`)
+                        .style('left', (event.pageX + 10) + 'px')
+                        .style('top', (event.pageY - 10) + 'px');
+                    highlightConnections(d);
+                })
+                .on('mouseout', function() {
+                    tooltip.style('display', 'none');
+                    clearHighlights();
+                })
+                .on('click', function(event, d) {
+                    showNodeInfo(d);
+                });
+
+                node = nodeEnter.merge(node);
+
+                // Update existing node visuals
+                node.select('circle')
+                    .attr('r', d => getNodeRadius(d))
+                    .attr('fill', d => categoryColors[d.category] || '#74b9ff');
+                node.select('text').text(d => d.name);
+
+                label = node.selectAll('text');
+
+                // Restart simulation with new data
+                simulation.nodes(graphData.nodes);
+                simulation.force('link').links(graphData.links);
+                simulation.alpha(0.3).restart();
+
+                // Flash indicator
+                const indicator = document.createElement('div');
+                indicator.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#00d9ff;color:#000;padding:8px 16px;border-radius:4px;font-weight:bold;z-index:9999;';
+                indicator.textContent = 'Graph Updated';
+                document.body.appendChild(indicator);
+                setTimeout(() => indicator.remove(), 2000);
+            });
+
+            evtSource.onerror = () => {
+                console.log('SSE connection lost, reconnecting...');
+            };
+        }
+
         init();
+        setupSSE();
     </script>
 </body>
 </html>

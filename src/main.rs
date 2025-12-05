@@ -542,12 +542,29 @@ fn cmd_graph(args: GraphArgs) -> i32 {
     // Build graph data
     let graph_data = archmap::graph::GraphData::from_analysis(&result, &path);
 
-    if args.serve {
+    if args.serve || args.watch {
         // Start web server
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-        if let Err(e) = rt.block_on(archmap::graph::serve(graph_data, args.port, args.open)) {
-            eprintln!("Error: Server failed: {}", e);
-            return 1;
+
+        if args.watch {
+            // Watch mode with live updates
+            let watch_ctx = archmap::graph::WatchContext {
+                path: path.clone(),
+                config,
+                registry,
+            };
+            if let Err(e) = rt.block_on(archmap::graph::serve_with_watch(
+                graph_data, args.port, args.open, watch_ctx,
+            )) {
+                eprintln!("Error: Server failed: {}", e);
+                return 1;
+            }
+        } else {
+            // Static serve mode
+            if let Err(e) = rt.block_on(archmap::graph::serve(graph_data, args.port, args.open)) {
+                eprintln!("Error: Server failed: {}", e);
+                return 1;
+            }
         }
     } else if let Some(export_path) = args.export {
         // Export static HTML
