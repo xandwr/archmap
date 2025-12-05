@@ -625,10 +625,22 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
 
                 label = node.selectAll('text');
 
-                // Restart simulation with new data
+                // Check if graph actually changed before restarting simulation
+                const nodesChanged = newData.nodes.length !== Object.keys(oldPositions).length ||
+                    newData.nodes.some(n => !oldPositions[n.id]);
+                const linksChanged = link.data().length !== graphData.links.length;
+
+                // Update simulation with new data
                 simulation.nodes(graphData.nodes);
                 simulation.force('link').links(graphData.links);
-                simulation.alpha(0.3).restart();
+
+                // Only restart simulation if structure actually changed
+                if (nodesChanged || linksChanged) {
+                    simulation.alpha(0.3).restart();
+                } else {
+                    // No structural changes - just update visuals without disturbing positions
+                    simulation.alpha(0).stop();
+                }
 
                 // Flash indicator
                 const indicator = document.createElement('div');
