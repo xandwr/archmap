@@ -17,6 +17,9 @@ pub enum ConfigError {
 pub struct Config {
     pub thresholds: Thresholds,
     pub boundaries: Vec<Boundary>,
+    /// Glob patterns for modules where high coupling is expected (e.g., core domain models).
+    /// Modules matching these patterns won't be flagged for high fan-in.
+    pub expected_high_coupling: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +35,8 @@ pub struct Thresholds {
 struct RawConfig {
     thresholds: Option<RawThresholds>,
     boundaries: Option<HashMap<String, RawBoundary>>,
+    #[serde(default)]
+    expected_high_coupling: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +53,9 @@ struct RawBoundary {
     name: Option<String>,
     indicators: Vec<String>,
     suggestion: Option<String>,
+    #[serde(default)]
+    allowed_in: Vec<String>,
+    ownership_threshold: Option<f64>,
 }
 
 impl Default for Config {
@@ -55,8 +63,25 @@ impl Default for Config {
         Self {
             thresholds: Thresholds::default(),
             boundaries: Boundary::default_boundaries(),
+            expected_high_coupling: default_expected_high_coupling(),
         }
     }
+}
+
+fn default_expected_high_coupling() -> Vec<String> {
+    vec![
+        "**/model/**".to_string(),
+        "**/models/**".to_string(),
+        "**/types/**".to_string(),
+        "**/config.rs".to_string(),
+        "**/config.ts".to_string(),
+        "**/config.py".to_string(),
+        "**/lib.rs".to_string(),
+        "**/mod.rs".to_string(),
+        "**/index.ts".to_string(),
+        "**/index.js".to_string(),
+        "**/__init__.py".to_string(),
+    ]
 }
 
 impl Default for Thresholds {
@@ -108,6 +133,9 @@ impl Config {
                         _ => BoundaryKind::Custom(key.clone()),
                     };
 
+                    // Get defaults for this boundary kind if available
+                    let defaults = get_boundary_defaults(&kind);
+
                     Boundary {
                         name: raw_b.name.unwrap_or_else(|| capitalize(&key)),
                         kind,
@@ -115,15 +143,28 @@ impl Config {
                         suggestion: raw_b
                             .suggestion
                             .unwrap_or_else(|| format!("Consider centralizing {} operations", key)),
+                        allowed_in: if raw_b.allowed_in.is_empty() {
+                            defaults.0
+                        } else {
+                            raw_b.allowed_in
+                        },
+                        ownership_threshold: raw_b.ownership_threshold.unwrap_or(defaults.1),
                     }
                 })
                 .collect(),
             None => Boundary::default_boundaries(),
         };
 
+        let expected_high_coupling = if raw.expected_high_coupling.is_empty() {
+            default_expected_high_coupling()
+        } else {
+            raw.expected_high_coupling
+        };
+
         Ok(Self {
             thresholds,
             boundaries,
+            expected_high_coupling,
         })
     }
 }
@@ -133,6 +174,40 @@ fn capitalize(s: &str) -> String {
     match chars.next() {
         None => String::new(),
         Some(c) => c.to_uppercase().chain(chars).collect(),
+    }
+}
+
+/// Get default allowed_in patterns and ownership_threshold for known boundary types
+fn get_boundary_defaults(kind: &BoundaryKind) -> (Vec<String>, f64) {
+    match kind {
+        BoundaryKind::Persistence => (
+            vec![
+                "**/db/**".to_string(),
+                "**/database/**".to_string(),
+                "**/repository/**".to_string(),
+                "**/repo/**".to_string(),
+            ],
+            0.5,
+        ),
+        BoundaryKind::Network => (
+            vec![
+                "**/client/**".to_string(),
+                "**/api/**".to_string(),
+                "**/http/**".to_string(),
+                "**/network/**".to_string(),
+            ],
+            0.5,
+        ),
+        BoundaryKind::Filesystem => (
+            vec![
+                "**/fs.rs".to_string(),
+                "**/io.rs".to_string(),
+                "**/io/**".to_string(),
+                "**/storage/**".to_string(),
+            ],
+            0.5,
+        ),
+        BoundaryKind::Custom(_) => (Vec::new(), 0.5),
     }
 }
 
@@ -163,9 +238,33 @@ max_dependency_depth = 5
 # Default: 0.3
 min_cohesion = 0.3
 
+# Expected High Coupling
+# Glob patterns for modules where high fan-in is expected and shouldn't be flagged.
+# Core domain models, config files, and index/entry modules typically have high coupling.
+# Default patterns cover common conventions across languages.
+expected_high_coupling = [
+    "**/model/**",
+    "**/models/**",
+    "**/types/**",
+    "**/config.rs",
+    "**/config.ts",
+    "**/config.py",
+    "**/lib.rs",
+    "**/mod.rs",
+    "**/index.ts",
+    "**/index.js",
+    "**/__init__.py",
+]
+
 # Architectural Boundaries
 # Define patterns that indicate crossing architectural boundaries.
 # Scattered boundary crossings often indicate missing abstraction layers.
+#
+# Each boundary supports:
+# - indicators: strings to search for in source code
+# - allowed_in: glob patterns for modules where this boundary is allowed (e.g., gateway modules)
+# - ownership_threshold: if one module has >= this fraction of occurrences, it's the "owner"
+#                        and won't be flagged (default: 0.5)
 
 [boundaries.persistence]
 name = "Persistence"
@@ -180,6 +279,8 @@ indicators = [
     "DELETE ",
 ]
 suggestion = "Consider centralizing in a repository/data access layer"
+# Modules matching these patterns are allowed to cross this boundary
+allowed_in = ["**/db/**", "**/database/**", "**/repository/**", "**/repo/**"]
 
 [boundaries.network]
 name = "Network"
@@ -193,23 +294,35 @@ indicators = [
     "http.post",
 ]
 suggestion = "Consider centralizing in an API client service"
+allowed_in = ["**/client/**", "**/api/**", "**/http/**", "**/network/**"]
 
 [boundaries.filesystem]
 name = "Filesystem"
 indicators = [
+    # Rust
     "std::fs::",
     "tokio::fs::",
-    "fs.read",
-    "fs.write",
+    # JavaScript/TypeScript (Node.js)
+    "fs.readFile",
+    "fs.writeFile",
+    "fs.readFileSync",
+    "fs.writeFileSync",
+    "fs.promises",
+    # Python
     "open(",
+    "pathlib.Path(",
+    "shutil.",
 ]
 suggestion = "Consider centralizing file operations or using dependency injection"
+allowed_in = ["**/fs.rs", "**/io.rs", "**/io/**", "**/storage/**"]
 
 # Custom boundaries example (uncomment to use):
 # [boundaries.logging]
 # name = "Logging"
 # indicators = ["log::", "tracing::", "console.log", "print("]
 # suggestion = "Consider using a centralized logging facade"
+# allowed_in = ["**/logger/**", "**/logging/**"]
+# ownership_threshold = 0.6  # Higher threshold = stricter ownership detection
 "#
     .to_string()
 }
