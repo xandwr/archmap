@@ -322,6 +322,7 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
         let simulation, svg, g, link, node, label;
         let graphData;
         let nodeScale = 1;
+        let lastUpdatePopup = 0;
 
         async function init() {
             const response = await fetch('/api/graph');
@@ -466,18 +467,22 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
         }
 
         function dragstarted(event) {
-            if (!event.active) simulation.alphaTarget(0.3).restart();
+            // Don't restart simulation - just track the node
             event.subject.fx = event.subject.x;
             event.subject.fy = event.subject.y;
         }
 
         function dragged(event) {
+            // Move node directly without simulation
             event.subject.fx = event.x;
             event.subject.fy = event.y;
+            event.subject.x = event.x;
+            event.subject.y = event.y;
+            ticked(); // Update visuals immediately
         }
 
         function dragended(event) {
-            if (!event.active) simulation.alphaTarget(0);
+            // Keep node at new position
             event.subject.fx = null;
             event.subject.fy = null;
         }
@@ -639,7 +644,7 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
 
                 label = node.selectAll('text');
 
-                // Check if graph actually changed before restarting simulation
+                // Check if graph actually changed
                 const nodesChanged = newData.nodes.length !== Object.keys(oldPositions).length ||
                     newData.nodes.some(n => !oldPositions[n.id]);
                 const linksChanged = link.data().length !== graphData.links.length;
@@ -648,20 +653,25 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
                 simulation.nodes(graphData.nodes);
                 simulation.force('link').links(graphData.links);
 
-                // Only restart simulation if structure actually changed
+                // Only re-layout if structure actually changed
                 if (nodesChanged || linksChanged) {
-                    simulation.alpha(0.3).restart();
-                } else {
-                    // No structural changes - just update visuals without disturbing positions
+                    // Run simulation synchronously to settle new nodes
+                    simulation.alpha(1);
+                    for (let i = 0; i < 300; i++) simulation.tick();
+                    ticked();
                     simulation.alpha(0).stop();
-                }
 
-                // Flash indicator
-                const indicator = document.createElement('div');
-                indicator.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#00d9ff;color:#000;padding:8px 16px;border-radius:4px;font-weight:bold;z-index:9999;';
-                indicator.textContent = 'Graph Updated';
-                document.body.appendChild(indicator);
-                setTimeout(() => indicator.remove(), 2000);
+                    // Show popup only when structure changed, with 30s cooldown
+                    const now = Date.now();
+                    if (now - lastUpdatePopup > 30000) {
+                        lastUpdatePopup = now;
+                        const indicator = document.createElement('div');
+                        indicator.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#00d9ff;color:#000;padding:8px 16px;border-radius:4px;font-weight:bold;z-index:9999;';
+                        indicator.textContent = 'Graph Updated';
+                        document.body.appendChild(indicator);
+                        setTimeout(() => indicator.remove(), 2000);
+                    }
+                }
             });
 
             evtSource.onerror = () => {
@@ -791,9 +801,9 @@ pub fn generate_static_html(graph_data: &super::GraphData) -> String {
 
         function getNodeRadius(d) {{ const base = Math.sqrt(d.lines) / 2 + 5; return Math.min(Math.max(base, 8), 30) * nodeScale; }}
         function ticked() {{ link.attr('x1', d => d.source.x).attr('y1', d => d.source.y).attr('x2', d => d.target.x).attr('y2', d => d.target.y); node.attr('transform', d => `translate(${{d.x}},${{d.y}})`); }}
-        function dragstarted(event) {{ if (!event.active) simulation.alphaTarget(0.3).restart(); event.subject.fx = event.subject.x; event.subject.fy = event.subject.y; }}
-        function dragged(event) {{ event.subject.fx = event.x; event.subject.fy = event.y; }}
-        function dragended(event) {{ if (!event.active) simulation.alphaTarget(0); event.subject.fx = null; event.subject.fy = null; }}
+        function dragstarted(event) {{ event.subject.fx = event.subject.x; event.subject.fy = event.subject.y; }}
+        function dragged(event) {{ event.subject.fx = event.x; event.subject.fy = event.y; event.subject.x = event.x; event.subject.y = event.y; ticked(); }}
+        function dragended(event) {{ event.subject.fx = null; event.subject.fy = null; }}
         function highlightConnections(d) {{ const connected = new Set(); connected.add(d.id); link.each(function(l) {{ if (l.source.id === d.id || l.target.id === d.id) {{ connected.add(l.source.id); connected.add(l.target.id); d3.select(this).classed('highlighted', true); }} }}); node.classed('highlighted', n => connected.has(n.id)); }}
         function clearHighlights() {{ link.classed('highlighted', false); node.classed('highlighted', false); }}
         function showNodeInfo(d) {{ document.getElementById('node-info').classList.add('visible'); document.getElementById('node-name').textContent = d.path; document.getElementById('node-lines').textContent = d.lines; document.getElementById('node-fan-in').textContent = d.fan_in; document.getElementById('node-fan-out').textContent = d.fan_out; document.getElementById('node-issues').textContent = d.issue_count; const exportsDiv = document.getElementById('node-exports'); exportsDiv.innerHTML = d.exports && d.exports.length > 0 ? d.exports.map(e => `<span>${{e}}</span>`).join('') : '<em>None</em>'; }}
