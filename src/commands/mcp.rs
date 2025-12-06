@@ -33,8 +33,17 @@ async fn run_mcp_server(args: McpArgs) -> i32 {
 
     let transport = rmcp::transport::io::stdio();
 
-    if let Err(e) = service.serve(transport).await {
-        eprintln!("MCP server error: {}", e);
+    let running_service = match service.serve(transport).await {
+        Ok(service) => service,
+        Err(e) => {
+            eprintln!("MCP server error: {}", e);
+            return 1;
+        }
+    };
+
+    // Keep the server running until the transport closes
+    if let Err(e) = running_service.waiting().await {
+        eprintln!("MCP server task error: {}", e);
         return 1;
     }
 
