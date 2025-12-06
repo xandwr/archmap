@@ -7,6 +7,12 @@ Architectural analysis for codebases. Understands dependencies, detects coupling
 ## Install
 
 ```bash
+cargo install archmap
+```
+
+or, locally:
+
+```bash
 cargo install --path .
 ```
 
