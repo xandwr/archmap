@@ -294,10 +294,6 @@ archmap --mcp-manifest > mcp-config.json
 # Add to your AI assistant's MCP configuration
 ```
 
-## For AI Agents
-
-If you're an AI agent with access to this tool, see [CLAUDE.md](CLAUDE.md) for usage instructions optimized for your workflow.
-
 ## License
 
 MIT
